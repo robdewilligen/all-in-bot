@@ -1,0 +1,26 @@
+name: all-in-db
+
+services:
+  postgres:
+    image: postgres:18
+    restart: unless-stopped
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in the .env of the data directory}
+    ports:
+      - '${ALLIN_DB_PORT:-5432}:5432'
+    volumes:
+      # From PostgreSQL 18 on, the data volume belongs at /var/lib/postgresql (no longer /data).
+      - pgdata:/var/lib/postgresql
+      # Long syntax: the Windows source path has a drive-letter colon.
+      - type: bind
+        source: ${ALLIN_DB_BACKUP_DIR:?run scripts/setup/init.ps1, it sets ALLIN_DB_BACKUP_DIR}
+        target: /backups
+    healthcheck:
+      # Over TCP, so the container only counts as healthy once the real server listens (not initdb's).
+      test: ['CMD-SHELL', 'pg_isready -h 127.0.0.1 -U postgres']
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+volumes:
+  pgdata:

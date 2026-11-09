@@ -380,6 +380,26 @@ Describe 'Locations' {
     }
 }
 
+Describe 'Resolve-DatabaseOption' {
+    It 'uses the defaults without state or parameters' {
+        $options = Resolve-DatabaseOption -State @{}
+        $options.DataDir | Should -BeExactly 'C:\all-in-db'
+        $options.Port | Should -Be 5432
+    }
+
+    It 'prefers the saved state over the defaults' {
+        $options = Resolve-DatabaseOption -State @{ dataDir = 'D:\pg'; port = 5433 }
+        $options.DataDir | Should -BeExactly 'D:\pg'
+        $options.Port | Should -Be 5433
+    }
+
+    It 'prefers explicit parameters over the saved state' {
+        $options = Resolve-DatabaseOption -State @{ dataDir = 'D:\pg'; port = 5433 } -DataDir 'E:\db' -Port 6000
+        $options.DataDir | Should -BeExactly 'E:\db'
+        $options.Port | Should -Be 6000
+    }
+}
+
 Describe 'Setup state' {
     It 'saves and reads values' {
         $path = Join-Path $TestDrive 'state\state.json'

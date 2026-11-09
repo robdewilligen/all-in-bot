@@ -52,6 +52,63 @@ function Get-SetupLogPath {
     Join-Path $LogDir ('{0}-{1}.log' -f $Name, $Now.ToString('yyyyMMdd-HHmmss'))
 }
 
+function Get-DatabaseLayout {
+    [pscustomobject]@{
+        DefaultDataDir = 'C:\all-in-db'
+        DefaultPort = 5432
+        ProjectName = 'all-in-db'
+        ServiceName = 'postgres'
+        SecretKeys = @('POSTGRES_PASSWORD', 'ALLIN_PASSWORD', 'ALLIN_DEV_PASSWORD')
+        Roles = @(
+            [pscustomobject]@{ Name = 'allin'; SecretKey = 'ALLIN_PASSWORD' }
+            [pscustomobject]@{ Name = 'allin_dev'; SecretKey = 'ALLIN_DEV_PASSWORD' }
+        )
+        Databases = @(
+            [pscustomobject]@{ Name = 'allin'; Owner = 'allin' }
+            [pscustomobject]@{ Name = 'allin_dev'; Owner = 'allin_dev' }
+            [pscustomobject]@{ Name = 'allin_test'; Owner = 'allin_dev' }
+        )
+        FirewallRuleName = 'AllIn-PostgreSQL'
+        FirewallDisplayName = 'All-in PostgreSQL (local network)'
+        LegacyFirewallDisplayName = 'All-in PostgreSQL (poort *'
+        BackupTaskName = 'All-in database backup'
+        BackupTaskDescription = 'All-in: nightly pg_dump of the allin database into the backups folder, kept 14 days. Managed by scripts/setup/init.ps1.'
+        BackupTime = '03:30'
+        BackupRetentionDays = 14
+    }
+}
+
+function Resolve-DatabaseOption {
+    param(
+        [AllowNull()][hashtable]$State,
+        [AllowEmptyString()][string]$DataDir = '',
+        [int]$Port = 0
+    )
+    $layout = Get-DatabaseLayout
+    if ($null -eq $State) { $State = @{} }
+    $resolvedDir = $DataDir
+    if (-not $resolvedDir -and $State.ContainsKey('dataDir')) { $resolvedDir = [string]$State['dataDir'] }
+    if (-not $resolvedDir) { $resolvedDir = $layout.DefaultDataDir }
+    $resolvedPort = $Port
+    if ($resolvedPort -le 0 -and $State.ContainsKey('port')) { $resolvedPort = [int]$State['port'] }
+    if ($resolvedPort -le 0) { $resolvedPort = $layout.DefaultPort }
+    [pscustomobject]@{ DataDir = $resolvedDir; Port = $resolvedPort }
+}
+
+function Get-DatabaseContainerId {
+    param([switch]$IncludeStopped)
+    $layout = Get-DatabaseLayout
+    $arguments = @('ps', '-q')
+    if ($IncludeStopped) { $arguments += '-a' }
+    $arguments += @(
+        '--filter', "label=com.docker.compose.project=$($layout.ProjectName)",
+        '--filter', "label=com.docker.compose.service=$($layout.ServiceName)"
+    )
+    $result = Invoke-NativeCommand -FilePath 'docker' -ArgumentList $arguments -Capture
+    if ($result.ExitCode -ne 0) { return $null }
+    @($result.Output | Where-Object { $_ }) | Select-Object -First 1
+}
+
 function Get-SetupExitCode {
     param([Parameter(Mandatory)][ValidateSet('Ready', 'Error', 'UserAction', 'Reboot')][string]$Name)
     $script:ExitCodes[$Name]
