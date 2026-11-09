@@ -249,6 +249,19 @@ Describe 'Setup results' {
         Get-CombinedExitCode -Results $imported.Results | Should -Be 3010
     }
 
+    It 'keeps hints through the result file and prints them under the status line' {
+        $list = New-Object System.Collections.Generic.List[object]
+        Add-SetupResult -List $list -Name 'Node.js' -Status ACTION -Message 'old' -Hint @('Upgrade it with nvm.', 'Then run setup.cmd again.') -Quiet
+        $path = Join-Path $TestDrive 'hint.json'
+        Export-SetupResult -Path $path -Results $list -ExitCode 2
+        $imported = (Import-SetupResult -Path $path).Results[0]
+        @($imported.Hint) | Should -Be @('Upgrade it with nvm.', 'Then run setup.cmd again.')
+
+        Mock -ModuleName 'AllIn.Setup' Write-Host {}
+        Show-SetupResult -Result $imported
+        Should -Invoke -ModuleName 'AllIn.Setup' Write-Host -Times 1 -ParameterFilter { "$Object" -eq ((' ' * 12) + 'Upgrade it with nvm.') }
+    }
+
     It 'round-trips an empty result list' {
         $path = Join-Path $TestDrive 'empty.json'
         Export-SetupResult -Path $path -Results @() -ExitCode 0
@@ -397,6 +410,27 @@ Describe 'Resolve-DatabaseOption' {
         $options = Resolve-DatabaseOption -State @{ dataDir = 'D:\pg'; port = 5433 } -DataDir 'E:\db' -Port 6000
         $options.DataDir | Should -BeExactly 'E:\db'
         $options.Port | Should -Be 6000
+    }
+
+    It 'drops a trailing backslash but keeps a drive root' {
+        (Resolve-DatabaseOption -State @{} -DataDir 'D:\My Data\').DataDir | Should -BeExactly 'D:\My Data'
+        (Resolve-DatabaseOption -State @{} -DataDir 'D:\').DataDir | Should -BeExactly 'D:\'
+    }
+}
+
+Describe 'Get-DatabaseContainerId' {
+    It 'skips docker warnings and returns the container id' {
+        Mock -ModuleName 'AllIn.Setup' Invoke-NativeCommand {
+            [pscustomobject]@{ ExitCode = 0; Output = @('WARNING: Error loading config file', '3f2a9c1b7d4e') }
+        }
+        Get-DatabaseContainerId | Should -BeExactly '3f2a9c1b7d4e'
+    }
+
+    It 'returns nothing when only a warning comes back' {
+        Mock -ModuleName 'AllIn.Setup' Invoke-NativeCommand {
+            [pscustomobject]@{ ExitCode = 0; Output = @('WARNING: something') }
+        }
+        Get-DatabaseContainerId | Should -BeNullOrEmpty
     }
 }
 

@@ -277,8 +277,11 @@ function Read-DevValue {
         Show-Instruction -Line @('The database PC prints DATABASE_URL and TEST_DATABASE_URL at the end of its setup; these two answers build the same lines.')
         $dbHost = ([string](Read-Host -Prompt '  Address of the database PC (for example 192.168.1.20)')).Trim()
         $secret = Read-SecretValue -Prompt '  allin_dev password (ALLIN_DEV_PASSWORD in the .env of its data directory)'
-        if ($dbHost -and $secret) {
+        # Only the missing key gets an answer, so a working DATABASE_URL is never replaced.
+        if ($dbHost -and $secret -and $Missing -contains 'DATABASE_URL') {
             $answers['DATABASE_URL'] = Format-PostgresUrl -User 'allin_dev' -Secret $secret -HostName $dbHost -Port $Port -Database 'allin_dev'
+        }
+        if ($dbHost -and $secret -and $Missing -contains 'TEST_DATABASE_URL') {
             $answers['TEST_DATABASE_URL'] = Format-PostgresUrl -User 'allin_dev' -Secret $secret -HostName $dbHost -Port $Port -Database 'allin_test'
         }
     }
@@ -322,9 +325,7 @@ function Invoke-PrerequisiteStep {
         Show-Instruction -Line @($run.Output | Select-Object -Last 10)
         return
     }
-    foreach ($item in @($check.Results | Where-Object { $_.Status -ne 'OK' })) {
-        Show-SetupStatus -Status $item.Status -Message (Format-SetupResultLine -Result $item)
-    }
+    foreach ($item in @($check.Results | Where-Object { $_.Status -ne 'OK' })) { Show-SetupResult -Result $item }
     switch ($run.ExitCode) {
         0 { Add-StepResult -Status OK -Message 'install.ps1 -CheckOnly finds everything in place' }
         3010 { Add-StepResult -Status ACTION -RebootRequired -Message 'a restart is pending; restart the PC, then run setup.cmd again' }
@@ -361,7 +362,8 @@ function Invoke-DockerEngineStep {
                 '- accept the Docker Subscription Service Agreement if it asks (no Docker account needed);'
                 '- wait until it shows "Engine running";'
                 '- if it reports a WSL problem, run "wsl --update" in an administrator PowerShell;'
-                '- if it reports that virtualization is off, turn on Intel VT-x or AMD SVM in the BIOS/UEFI.'
+                '- if it reports that virtualization is off, turn on Intel VT-x or AMD SVM in the BIOS/UEFI;'
+                '- if docker reports "Access is denied" right after the installation, sign out of Windows and back in.'
                 'Then run setup.cmd again.'
             )
             return

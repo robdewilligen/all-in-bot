@@ -89,6 +89,8 @@ function Resolve-DatabaseOption {
     $resolvedDir = $DataDir
     if (-not $resolvedDir -and $State.ContainsKey('dataDir')) { $resolvedDir = [string]$State['dataDir'] }
     if (-not $resolvedDir) { $resolvedDir = $layout.DefaultDataDir }
+    # Windows PowerShell 5.1 passes 'D:\My Data\' to a native program as "D:\My Data\", which escapes the closing quote.
+    if ($resolvedDir -notmatch '^[A-Za-z]:\\$') { $resolvedDir = $resolvedDir.TrimEnd('\') }
     $resolvedPort = $Port
     if ($resolvedPort -le 0 -and $State.ContainsKey('port')) { $resolvedPort = [int]$State['port'] }
     if ($resolvedPort -le 0) { $resolvedPort = $layout.DefaultPort }
@@ -106,7 +108,8 @@ function Get-DatabaseContainerId {
     )
     $result = Invoke-NativeCommand -FilePath 'docker' -ArgumentList $arguments -Capture
     if ($result.ExitCode -ne 0) { return $null }
-    @($result.Output | Where-Object { $_ }) | Select-Object -First 1
+    # Output also holds stderr, so a docker warning must not pass for a container id.
+    @($result.Output | Where-Object { $_ -match '^[0-9a-f]{12,64}$' }) | Select-Object -First 1
 }
 
 function Get-SetupExitCode {
@@ -148,25 +151,36 @@ function Format-SetupResultLine {
     else { [string]$Result.Name }
 }
 
+function Show-SetupResult {
+    param([Parameter(Mandatory)][object]$Result)
+    Show-SetupStatus -Status $Result.Status -Message (Format-SetupResultLine -Result $Result)
+    if ($Result.PSObject.Properties['Hint']) {
+        foreach ($line in @($Result.Hint | Where-Object { $_ })) { Write-Host ((' ' * 12) + $line) }
+    }
+}
+
 function Add-SetupResult {
     param(
         [Parameter(Mandatory)][AllowEmptyCollection()][System.Collections.Generic.List[object]]$List,
         [Parameter(Mandatory)][string]$Name,
         [Parameter(Mandatory)][ValidateSet('OK', 'INSTALLED', 'ACTION', 'FAILED', 'SKIPPED')][string]$Status,
         [AllowEmptyString()][string]$Message = '',
+        [AllowEmptyCollection()][string[]]$Hint = @(),
         [switch]$Advisory,
         [switch]$RebootRequired,
         [switch]$Quiet
     )
+    # Hints travel in the result file, so setup.ps1 can repeat them after the administrator window closes.
     $result = [pscustomobject]@{
         Name = $Name
         Status = $Status
         Message = $Message
+        Hint = @($Hint)
         Advisory = [bool]$Advisory
         RebootRequired = [bool]$RebootRequired
     }
     $List.Add($result)
-    if (-not $Quiet) { Show-SetupStatus -Status $Status -Message (Format-SetupResultLine -Result $result) }
+    if (-not $Quiet) { Show-SetupResult -Result $result }
 }
 
 function Get-CombinedExitCode {

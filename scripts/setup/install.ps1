@@ -41,7 +41,6 @@ param(
 Import-Module (Join-Path $PSScriptRoot 'AllIn.Setup.psm1') -Force
 Set-StrictMode -Version 3.0
 
-$script:HintIndent = ' ' * 12
 $script:MinimumWslVersion = '2.1.5'
 $script:WingetNoInstalledPackage = -1978335212
 $script:StandbySettingId = '29f6c1db-86da-48c5-9fdb-f2b67b1f44da'
@@ -76,11 +75,11 @@ function Add-ItemOutcome {
         Name = $Name
         Status = $Outcome.Status
         Message = $Outcome.Message
+        Hint = $Outcome.Hint
         Advisory = $Outcome.Advisory
         RebootRequired = $Outcome.RebootRequired
     }
     Add-SetupResult @result
-    foreach ($line in $Outcome.Hint) { Show-SetupMessage -Text ($script:HintIndent + $line) }
 }
 
 function Get-InstallPlan {

@@ -104,9 +104,7 @@ try {
                 $installOutcome = Import-SetupResult -Path $installResultPath
                 if ($null -ne $installOutcome) {
                     Show-SetupMessage 'Result of the administrator window:'
-                    foreach ($result in $installOutcome.Results) {
-                        Show-SetupStatus -Status $result.Status -Message (Format-SetupResultLine -Result $result)
-                    }
+                    foreach ($result in $installOutcome.Results) { Show-SetupResult -Result $result }
                 }
             }
             $installOutcome = Import-SetupResult -Path $installResultPath
@@ -118,7 +116,7 @@ try {
         if (-not $CheckOnly -and $nextStep -ne 'Continue') {
             $exitCode = $installOutcome.ExitCode
             if ($nextStep -eq 'Reboot') {
-                $resumeCommand = Get-ResumeCommand -SetupCmdPath (Join-Path (Get-RepoRoot) 'setup.cmd') -ArgumentList (ConvertTo-ArgumentList -BoundParameters $PSBoundParameters)
+                $resumeCommand = Get-ResumeCommand -SetupCmdPath (Join-Path (Get-RepoRoot) 'setup.cmd') -ArgumentList @(ConvertTo-ArgumentList -BoundParameters $PSBoundParameters)
                 Show-SetupMessage ''
                 Show-SetupStatus -Status ACTION -Message 'Windows needs a restart to finish the installation.'
                 # RunOnce entries longer than 260 characters are not run.

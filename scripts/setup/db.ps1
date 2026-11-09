@@ -200,7 +200,8 @@ function Invoke-RestoreAction {
         Show-SetupStatus -Status ACTION -Message 'Nothing restored: the name did not match.'
         return 2
     }
-    $arguments = @('exec', $id, 'pg_restore', '-U', 'postgres', '--clean', '--if-exists', '-d', $Database)
+    # One transaction: a restore that fails halfway leaves the database as it was.
+    $arguments = @('exec', $id, 'pg_restore', '-U', 'postgres', '--clean', '--if-exists', '--single-transaction', '-d', $Database)
     if ($Database -ne 'allin') { $arguments += @('--no-owner', '--no-acl', "--role=$($target.Owner)") }
     $arguments += "/backups/$($dump.Name)"
     $run = Invoke-NativeCommand -FilePath 'docker' -ArgumentList $arguments
