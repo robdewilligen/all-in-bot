@@ -4,6 +4,8 @@ BeforeAll {
 
     function script:Invoke-SetupCmd {
         param([string[]]$ArgumentList)
+        # CI runs with Stop; in 5.1 the child's stderr through 2>&1 would then throw instead of being captured.
+        $ErrorActionPreference = 'Continue'
         $savedLocalAppData = $env:LOCALAPPDATA
         try {
             # setup.ps1 keeps its logs and state under LOCALAPPDATA; keep test runs out of the real one.
