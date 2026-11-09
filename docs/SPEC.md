@@ -204,6 +204,7 @@ Wallet API (names may change, the guarantees may not):
 - `claimDaily(player, now)`
 - `playInstant(player, game, stake, play)`: debit, play and credit in one transaction (slots)
 - `openTableRound`, then `openRound` and `raiseRound` for each player at the table, then `settleTableRound`, which settles the table round and all of its players' rounds in one transaction. Rows are locked through `SELECT … FOR UPDATE`.
+- `refundTableRound(id)`: refunds one open table round and its players' rounds, for a table whose settlement failed, so its players can play that game again without a restart
 - `refundOpenRounds()`: called once at startup; refunds open rounds and marks their table rounds refunded
 
 Tests, against `TEST_DATABASE_URL`:
