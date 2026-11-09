@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+    branches: [master]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: allin_test
+          POSTGRES_PASSWORD: allin_test
+          POSTGRES_DB: allin_test
+        ports:
+          - 5432:5432
+        # Over TCP, so initdb's temporary server doesn't count as healthy.
+        options: >-
+          --health-cmd "pg_isready -h 127.0.0.1 -U allin_test -d allin_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+
+    env:
+      # Throwaway CI container, not a secret.
+      TEST_DATABASE_URL: postgresql://allin_test:allin_test@localhost:5432/allin_test
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run check
