@@ -80,6 +80,8 @@ Boundaries:
 - Current APIs only: `withResponse: true` instead of `fetchReply`, `Events.ClientReady`, and `setContexts(InteractionContextType.Guild)` plus `setIntegrationTypes(ApplicationIntegrationType.GuildInstall)` instead of `setDMPermission`.
 - Tables (roulette, blackjack) are ordinary bot messages in the channel, so they outlive the 15-minute interaction token. A component collector on the table message handles the buttons, with phase timers (betting, turns) instead of one idle timeout, and each table handles one action at a time. Only the player whose seat or turn it is can act; anyone else gets an ephemeral notice. Catch errors inside collector callbacks.
 - One shared error helper: player errors are ephemeral and specific, unexpected errors are logged and get a generic message (`followUp` when the interaction was already replied to or deferred).
+- A `followUp` straight after a public `deferReply` replaces the loading message and ignores the Ephemeral flag, so an error would show publicly. A command that defers and can still throw a `PlayerError` defers ephemerally or validates first.
+- Log Discord errors through `loggableError()` (`src/bot/errors.ts`): REST errors carry the request URL, and interaction routes put the token in it.
 - Client options include `allowedMentions: { parse: [] }`. Listen to the client `error` event and log `unhandledRejection`.
 - Slash commands are registered by the deploy script only, never on startup.
 - Command and option names: English, lowercase, at most 32 characters.
@@ -95,7 +97,8 @@ Boundaries:
 
 - Engines: unit tests with seeded RNGs and stacked decks.
 - Wallet and database: integration tests against `TEST_DATABASE_URL` only, never the dev or production database. Truncate between tests.
-- Discord layer: tests with fake interactions, no network.
+- Vitest has two projects: `db` (`test/db/`, migrated once by `test/db/global-setup.ts`, files run one at a time) and `unit` (everything else, no database). `vitest.config.ts` passes only `TEST_DATABASE_URL` on to the tests, and `test/db/helpers.ts` refuses a database whose name doesn't end in `_test`.
+- Discord layer: tests with fake interactions, no network; the fakes are in `test/helpers/` (`fakeChatInput` and friends, `fakeContext` with a mock wallet).
 - A task is done when `npm run check` passes.
 - Changes in `scripts/setup/` or `setup.cmd` also need `npm run check:setup`. Those scripts target Windows PowerShell 5.1; the rules are in `docs/WINDOWS-SETUP.md` ("Rules for both scripts").
 

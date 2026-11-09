@@ -22,7 +22,25 @@ Server owners: please don't run giveaways or rewards based on All-in balances. T
 
 ## Setup
 
-_To be written._
+On Windows, `setup.cmd` does most of this for you (see [Windows setup](#windows-setup)).
+
+1. **Configuration.** Copy `.env.example` to `.env` and fill it in. The bot checks every value at startup and exits with a message that names what's missing or invalid.
+
+   | Variable | Required | Meaning |
+   | --- | --- | --- |
+   | `DISCORD_TOKEN` | yes | Bot token |
+   | `DISCORD_CLIENT_ID` | yes | Application ID |
+   | `DEV_GUILD_ID` | no | `deploy:commands` registers in this server only, which is instant |
+   | `DATABASE_URL` | yes | `postgresql://user:password@host:5432/database` |
+   | `TEST_DATABASE_URL` | tests only | A separate database that the tests wipe; its name must end in `_test` |
+   | `DAILY_RESET_TIMEZONE` | no | When the daily gift resets; default `Europe/Amsterdam` |
+   | `LOG_LEVEL` | no | Default `info` |
+
+2. **Database.** `npm run db:migrate` brings the database in `DATABASE_URL` up to date. Each database belongs to exactly one bot process: at startup the bot refunds every open round it finds, which would hit another instance's live tables.
+3. **Discord.** Invite the bot with the scopes `bot` and `applications.commands` and the permissions View Channels, Send Messages and Embed Links; roulette and blackjack tables need those three in their channel. Then `npm run deploy:commands` registers the slash commands: in `DEV_GUILD_ID` when it's set, otherwise globally.
+4. **Run.** `npm run dev` for development, or `npm run build` and `npm start`.
+
+Tests: `npm test` needs `TEST_DATABASE_URL`. `npm test -- --project unit` runs everything except the database tests.
 
 ## Commands
 
