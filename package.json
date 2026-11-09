@@ -20,7 +20,17 @@
     "test": "vitest run",
     "check": "npm run typecheck && npm run lint && prettier --check . && npm run test",
     "sim:blackjack": "tsx scripts/simulate-blackjack.ts",
-    "rtp:slots": "tsx scripts/slots-rtp.ts"
+    "rtp:slots": "tsx scripts/slots-rtp.ts",
+    "setup": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/setup/setup.ps1",
+    "setup:install": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/setup/setup.ps1 -InstallOnly",
+    "setup:init": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/setup/init.ps1",
+    "setup:check": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/setup/setup.ps1 -CheckOnly",
+    "check:setup": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/setup/tests/Invoke-SetupChecks.ps1",
+    "db:status": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/setup/db.ps1 status",
+    "db:logs": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/setup/db.ps1 logs",
+    "db:psql": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/setup/db.ps1 psql",
+    "db:backup": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/setup/db.ps1 backup",
+    "db:restore": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/setup/db.ps1 restore"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

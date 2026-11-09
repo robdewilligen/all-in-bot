@@ -40,3 +40,14 @@ jobs:
       - run: npm ci
 
       - run: npm run check
+
+  setup-scripts:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      # Windows PowerShell 5.1, the version every target PC has.
+      - name: PSScriptAnalyzer and Pester
+        shell: powershell
+        run: .\scripts\setup\tests\Invoke-SetupChecks.ps1 -InstallMissing
