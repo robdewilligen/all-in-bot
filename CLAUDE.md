@@ -27,6 +27,10 @@ Keep this table in sync with package.json.
 | `npm run typecheck` / `lint` / `format` / `test` | The usual |
 | `npm run check` | typecheck + lint + format check + tests, the same as CI |
 | `npm run sim:blackjack` / `npm run rtp:slots` | Verification scripts (see the spec) |
+| `npm run setup` / `setup:check` | Windows setup (`docs/WINDOWS-SETUP.md`): prepare this PC / report only. Options after `--`, e.g. `npm run setup -- -Dev` |
+| `npm run setup:install` / `setup:init` | Only the software part (asks for administrator rights) / only the project part |
+| `npm run check:setup` | PSScriptAnalyzer and Pester for `scripts/setup/`, in Windows PowerShell 5.1 (also a CI job) |
+| `npm run db:status` / `db:logs` / `db:psql` / `db:backup` / `db:restore` | Database host: container status, logs, a psql shell, a backup now, restore a dump |
 
 ## Layout
 
@@ -45,7 +49,10 @@ src/
   i18n/                every user-facing string
 test/                  unit and integration tests
 scripts/               simulation and RTP scripts
+  setup/               Windows setup: setup.ps1, install.ps1 (admin), init.ps1, db.ps1, AllIn.Setup.psm1, tests/ (Pester)
 drizzle/               generated SQL migrations (committed)
+deploy/database/       compose.yaml for PostgreSQL 18 on the database host
+setup.cmd              Windows setup entry point, starts scripts/setup/setup.ps1
 ```
 
 Boundaries:
@@ -90,6 +97,7 @@ Boundaries:
 - Wallet and database: integration tests against `TEST_DATABASE_URL` only, never the dev or production database. Truncate between tests.
 - Discord layer: tests with fake interactions, no network.
 - A task is done when `npm run check` passes.
+- Changes in `scripts/setup/` or `setup.cmd` also need `npm run check:setup`. Those scripts target Windows PowerShell 5.1; the rules are in `docs/WINDOWS-SETUP.md` ("Rules for both scripts").
 
 ## Workflow
 
