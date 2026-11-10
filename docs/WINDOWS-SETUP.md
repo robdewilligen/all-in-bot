@@ -1,6 +1,6 @@
 # Windows setup
 
-One command prepares a Windows PC for All-in. It must work without AI: plain PowerShell, with npm aliases once Node.js is installed. The main target is the second PC, which hosts PostgreSQL in Docker (and later the bot). With `-Dev`, the same command prepares a development PC, without Docker or PostgreSQL.
+One command prepares a Windows PC for All-in. It must work without AI: plain PowerShell, with npm aliases once Node.js is installed. The main target is the second PC, which hosts PostgreSQL and the production bot in Docker. With `-Dev`, the same command prepares a development PC, without Docker or PostgreSQL.
 
 ## Usage
 
@@ -23,10 +23,11 @@ Later runs, for example after `git pull`: `.\setup.cmd` again, or `npm run setup
 | `setup.cmd` | The one command. Starts `scripts/setup/setup.ps1` with `-ExecutionPolicy Bypass`, so the machine's execution policy stays untouched. Works from a terminal and by double-click (then keep the window open at the end). |
 | `scripts/setup/setup.ps1` | Orchestrator: runs `install.ps1` elevated, then `init.ps1` as the normal user, then prints a summary. |
 | `scripts/setup/install.ps1` | Script 1: checks and installs software and machine settings (administrator). |
-| `scripts/setup/init.ps1` | Script 2: initializes the project: database container, roles, databases, packages, migrations, backups and later the bot (normal user). |
+| `scripts/setup/init.ps1` | Script 2: initializes the project: database container, roles, databases, packages, migrations, backups and the production bot (normal user). |
 | `scripts/setup/AllIn.Setup.psm1` | Shared helpers, unit tested. |
 | `scripts/setup/tests/` | Pester tests. |
 | `deploy/database/compose.yaml` | The PostgreSQL service. |
+| `deploy/compose.yaml`, `deploy/Dockerfile` | The production bot (step 9). |
 | `docs/reference/setup-allin-db.ps1` | The stand-alone predecessor; see "Reference script" below. |
 
 npm aliases: `setup`, `setup:install`, `setup:init` and `setup:check`, plus `db:status`, `db:logs`, `db:psql`, `db:backup` and `db:restore` for the database host.
@@ -76,12 +77,15 @@ Check every item first, install only what's missing, and print one status line p
    - databases `allin` (owner `allin`), and `allin_dev` and `allin_test` (owner `allin_dev`);
    - `REVOKE CONNECT ... FROM PUBLIC` on all three, so each role can only reach its own databases.
 6. Run `npm ci` when `node_modules` is missing or `package-lock.json` changed since the last successful run.
-7. Migrations: run `npm run db:migrate` against `allin` (as `allin`) and against `allin_dev` and `allin_test` (as `allin_dev`). Set `DATABASE_URL` for that child process only, on `localhost`. Before migrations exist, skip this step with a notice.
+7. Migrations: run `npm run db:migrate` against `allin_dev` and `allin_test` (as `allin_dev`), and against `allin` (as `allin`) only when `deploy/compose.yaml` doesn't exist. With it, the bot container migrates `allin` when it starts (step 9), after compose has stopped the old bot, so the old bot never runs on a newer schema. Set `DATABASE_URL` for that child process only, on `localhost`. Before migrations exist, skip this step with a notice.
 8. Nightly backup: copy a backup script into the data directory and register a scheduled task that runs daily at 03:30. It runs `pg_dump -Fc` for `allin` inside the container, writes to `/backups` and deletes dumps older than 14 days. Write the dump inside the container (`pg_dump -f`); never pipe a binary dump through PowerShell.
-9. The bot, once `deploy/compose.yaml` exists (deployment phase):
-   - create `<DataDir>\bot.env` from `.env.example`, with `DATABASE_URL` through `host.docker.internal`, the production Discord token (hidden prompt), the application ID, and no `DEV_GUILD_ID`;
-   - register the slash commands from inside the bot image (`docker compose run --rm ...`), only when the command definitions changed;
-   - start or update the bot container under the project name `all-in`.
+9. The production bot from `deploy/compose.yaml` (project `all-in`, service `bot`, image `all-in-bot`), with one status line per part. Every `docker compose` call gets `ALLIN_BOT_ENV_FILE` (the path of `bot.env`, in forward slashes) for that child process only, and an empty stdin, so docker never waits for input.
+   - **bot.env.** When `<DataDir>\bot.env` is missing, create it from `.env.example` and restrict it like `.env` before any secret goes in. `DATABASE_URL` points to the database `allin` as role `allin` through `host.docker.internal` on `-Port`, with the `ALLIN_PASSWORD` of the data `.env` percent-encoded. The production bot token comes from a hidden prompt and the application ID from a prompt; an answer that isn't a bot token (three dot-separated parts) or an application ID (17 to 20 digits) isn't saved. `DEV_GUILD_ID` and `TEST_DATABASE_URL` stay empty, so commands are registered globally, and no example value of the template survives. In an existing `bot.env` only empty or absent values are filled in, never an existing one. With `-NonInteractive`, write what's known and stop (`ACTION`) with the keys to fill in.
+   - **Bot image.** `docker compose build bot`, with `BUILDX_NO_DEFAULT_ATTESTATIONS=1` for that child process only. Attestations hold build timestamps, so without them an unchanged checkout keeps its image id and the bot isn't restarted. `deploy/compose.yaml` also sets `provenance: false` and `sbom: false` (which needs Compose v2.39 or later), but Compose before v5.5.1 ignores them; the variable works on every version. `OK` when the image id of `all-in-bot` didn't change, `INSTALLED` when the build made a new one.
+   - **Slash commands.** Print the definitions from inside the new image (`docker compose run --rm -T bot node dist/deploy-commands.js --print`, which needs no token) and hash them with SHA-256, together with `DISCORD_CLIENT_ID` and `DEV_GUILD_ID`. Register them (the same command without `--print`) only when that hash differs from `botCommandsHash` in the state file, and save the hash after a successful registration.
+   - **Bot container.** `docker compose up --detach --wait --wait-timeout 180`, which recreates the container on a new image and returns once its healthcheck sees the bot logged in to Discord. The container migrates `allin` before it starts the bot; step 7 leaves `allin` to it.
+   - The Docker parts need the Docker engine, a complete `bot.env` and the roles and databases (step 5); otherwise they're `SKIPPED` with the reason. A failed migration of `allin_dev` or `allin_test` (step 7) or a failed `npm ci` (step 6) doesn't hold back the bot. A failed build or registration leaves the running bot alone. When the bot doesn't come online, the line under its status gives the command for its log: `docker logs --tail 100 all-in-bot-1`.
+   - `-CheckOnly` reports whether `bot.env` is complete and private and whether the bot container runs and is healthy; it doesn't build or register.
 10. Summary:
     - the status of every step;
     - the PC's LAN IPv4 and MAC address, for a DHCP reservation;
@@ -97,7 +101,7 @@ Check every item first, install only what's missing, and print one status line p
 
 ## Rules for both scripts
 
-- **Idempotent and resumable.** Check before every change, so the scripts are safe to run any number of times. No destructive actions: they never drop data, delete databases or overwrite secrets. (`db:restore` is separate and asks for the database name as confirmation.)
+- **Idempotent and resumable.** Check before every change, so the scripts are safe to run any number of times. No destructive actions: they never drop data, delete databases or overwrite secrets. (`db:restore` is separate and asks for the database name as confirmation. For `allin` it stops a running bot container during the restore and starts it again afterwards, also when the restore fails, so the bot never works on a database that changes under it, and its startup refund cleans up the rounds that were open in the dump.)
 - **Guide instead of failing silently.** Whenever the user has to act (UAC, reboot, Docker Desktop's first start, BIOS, network profile), say exactly what to do and how to continue, then exit with the matching code.
 - **Output.** Numbered steps, one status line per check, and a summary at the end. Colour helps, but the output must be readable without it.
 - **Logs and state.** Write a transcript per run to `%LOCALAPPDATA%\all-in\logs`. Secrets never appear in output or logs; print the dev connection lines only after the transcript has stopped. Keep state between runs (hashes) in `%LOCALAPPDATA%\all-in\state.json`.
@@ -113,7 +117,7 @@ Check every item first, install only what's missing, and print one status line p
 
 ## Tests
 
-- Shared logic lives in `AllIn.Setup.psm1` and has Pester 5 tests: password generation, reading and merging env files without overwriting, version comparison, connection strings, exit-code handling and the PATH refresh.
+- Shared logic lives in `AllIn.Setup.psm1` and has Pester 5 tests: password generation, reading and merging env files without overwriting, version comparison, connection strings, exit-code handling, the PATH refresh, and step 9: `bot.env`, the hash of the command definitions and the decisions of each part, with docker mocked. Also which databases step 7 migrates, the gate of step 9, and the bot stop and start around a restore of `allin`.
 - PSScriptAnalyzer passes with the default rules. Suppress a rule only with a written justification.
 - CI gets a `windows-latest` job that runs PSScriptAnalyzer and Pester (no Docker needed). Check whether the runner has both modules, and install them otherwise.
 - The README contains a manual test checklist covering:

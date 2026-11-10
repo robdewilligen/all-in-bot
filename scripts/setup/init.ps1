@@ -2,7 +2,7 @@
 <#
 .SYNOPSIS
     Script 2 of the All-in Windows setup (normal user). On the database PC: PostgreSQL 18 in Docker with its roles,
-    databases, npm packages, migrations and a nightly backup. With -Dev: prepares a development PC.
+    databases, npm packages, migrations, a nightly backup and the production bot. With -Dev: prepares a development PC.
 .PARAMETER Dev
     Prepare a development PC: npm packages, the repository .env, a check of the database host and migrations.
 .PARAMETER CheckOnly
@@ -96,18 +96,7 @@ function Invoke-NativeWithEnvironment {
         [Parameter(Mandatory)][string[]]$ArgumentList,
         [hashtable]$Environment = @{}
     )
-    # The variables reach only this child process; the previous values come back afterwards.
-    $saved = @{}
-    foreach ($name in @($Environment.Keys)) {
-        $saved[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
-        [Environment]::SetEnvironmentVariable($name, [string]$Environment[$name], 'Process')
-    }
-    try {
-        Invoke-NativeCommand -FilePath $FilePath -ArgumentList $ArgumentList -Secret $script:secrets
-    }
-    finally {
-        foreach ($name in @($saved.Keys)) { [Environment]::SetEnvironmentVariable($name, $saved[$name], 'Process') }
-    }
+    Invoke-NativeCommand -FilePath $FilePath -ArgumentList $ArgumentList -Environment $Environment -Secret $script:secrets
 }
 
 function Invoke-RepoNpm {
@@ -146,14 +135,6 @@ function Wait-DockerEngine {
         }
     }
     $null
-}
-
-function Get-ContainerHealth {
-    param([Parameter(Mandatory)][string]$ContainerId)
-    $format = '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}'
-    $result = Invoke-NativeCommand -FilePath 'docker' -ArgumentList @('inspect', '--format', $format, $ContainerId) -Capture
-    if ($result.ExitCode -ne 0) { return 'unknown' }
-    [string](@($result.Output) | Select-Object -First 1)
 }
 
 function Get-PortOwnerName {
@@ -228,18 +209,6 @@ function Register-BackupTask {
     $principal = New-ScheduledTaskPrincipal -UserId ([Security.Principal.WindowsIdentity]::GetCurrent().Name) -LogonType Interactive -RunLevel Limited
     Register-ScheduledTask -TaskName $layout.BackupTaskName -Description $layout.BackupTaskDescription -Action $action `
         -Trigger $trigger -Settings $settings -Principal $principal -Force -ErrorAction Stop | Out-Null
-}
-
-function Read-SecretValue {
-    param([Parameter(Mandatory)][string]$Prompt)
-    $secure = Read-Host -Prompt $Prompt -AsSecureString
-    $pointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
-    try {
-        [Runtime.InteropServices.Marshal]::PtrToStringBSTR($pointer)
-    }
-    finally {
-        [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($pointer)
-    }
 }
 
 function Get-MissingDevKey {
@@ -550,21 +519,22 @@ function Invoke-PackageStep {
 }
 
 function Invoke-MigrationStep {
+    param([switch]$WithBot)
     if (-not (Test-MigrationJournal)) { Add-StepResult -Status SKIPPED -Message $script:noMigrations; return }
     if ($CheckOnly) { Add-StepResult -Status SKIPPED -Message $script:checkOnlyMigrations; return }
     if (-not (Test-StepPassed -Name 'Roles and databases')) { Add-StepResult -Status SKIPPED -Message 'needs the roles and databases (step 5)'; return }
     if (-not (Test-StepPassed -Name 'npm packages')) { Add-StepResult -Status SKIPPED -Message 'needs the npm packages (step 6)'; return }
-    foreach ($database in $layout.Databases) {
-        $role = @($layout.Roles | Where-Object { $_.Name -eq $database.Owner })[0]
-        $url = Format-PostgresUrl -User $role.Name -Secret ([string]$script:envValues[$role.SecretKey]) -HostName 'localhost' -Port $Port -Database $database.Name
-        Show-SetupMessage -Text ('  {0} (as {1})' -f $database.Name, $role.Name)
+    $plan = Get-HostMigrationPlan -WithBot:$WithBot
+    foreach ($target in $plan.Targets) {
+        $url = Format-PostgresUrl -User $target.Role -Secret ([string]$script:envValues[$target.SecretKey]) -HostName 'localhost' -Port $Port -Database $target.Database
+        Show-SetupMessage -Text ('  {0} (as {1})' -f $target.Database, $target.Role)
         $run = Invoke-RepoNpm -ArgumentList @('run', 'db:migrate') -Environment @{ DATABASE_URL = $url }
         if ($run.ExitCode -ne 0) {
-            Add-StepResult -Status FAILED -Message "npm run db:migrate failed for $($database.Name) with exit code $($run.ExitCode); see the output above"
+            Add-StepResult -Status FAILED -Message "npm run db:migrate failed for $($target.Database) with exit code $($run.ExitCode); see the output above"
             return
         }
     }
-    Add-StepResult -Status OK -Message 'allin, allin_dev and allin_test are up to date'
+    Add-StepResult -Status OK -Message $plan.Summary
 }
 
 function Invoke-BackupStep {
@@ -652,16 +622,19 @@ function Invoke-HostSetup {
     Enter-Step -Number 6 -Name 'npm packages'
     Invoke-PackageStep
 
+    $withBot = Test-Path -LiteralPath (Join-Path $repoRoot (Get-BotLayout).ComposeFile) -PathType Leaf
     Enter-Step -Number 7 -Name 'Migrations'
-    Invoke-MigrationStep
+    Invoke-MigrationStep -WithBot:$withBot
 
     Enter-Step -Number 8 -Name 'Nightly backup'
     if ($dataReady) { Invoke-BackupStep }
     else { Add-StepResult -Status SKIPPED -Message 'needs the data directory (step 3)' }
 
     Enter-Step -Number 9 -Name 'Bot'
-    if (Test-Path -LiteralPath (Join-Path $repoRoot 'deploy\compose.yaml') -PathType Leaf) {
-        Add-StepResult -Status SKIPPED -Message 'deploying the bot is not automated by this version of init.ps1'
+    if ($withBot) {
+        Invoke-BotDeployment -Results $script:results -RepoRoot $repoRoot -DataDir $DataDir -Port $Port -State $state `
+            -StatePath $location.StatePath -Secret $script:secrets -CheckOnly:$CheckOnly -NonInteractive:(-not $script:prompting) `
+            -DataReady:$dataReady -DockerReady:$dockerReady -DatabaseReady:(Test-BotDatabaseReady -Results $script:results.ToArray())
     }
     else {
         Add-StepResult -Status SKIPPED -Message "deploy/compose.yaml doesn't exist yet (deployment phase)"

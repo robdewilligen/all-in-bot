@@ -35,7 +35,7 @@ Describe 'init.ps1 -CheckOnly on the database host' {
     It 'writes every host step to the result file, in order, with the exit code' {
         @($script:result.Results | ForEach-Object { $_.Name }) | Should -Be @(
             'Prerequisites', 'Docker engine', 'Data directory', 'PostgreSQL', 'Roles and databases',
-            'npm packages', 'Migrations', 'Nightly backup', 'Bot'
+            'npm packages', 'Migrations', 'Nightly backup', 'bot.env', 'Bot image', 'Slash commands', 'Bot container'
         )
         $script:result.ExitCode | Should -Be $script:run.ExitCode
     }

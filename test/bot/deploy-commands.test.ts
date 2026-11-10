@@ -1,21 +1,26 @@
-import type { REST } from 'discord.js';
+import { Collection, type REST } from 'discord.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Command } from '../../src/bot/types.js';
+import { EnvError } from '../../src/config/env.js';
 import { logger } from '../../src/core/logger.js';
-import { deployCommands } from '../../src/deploy-commands.js';
+import { commandDefinitions, deployCommands, main, PRINT_FLAG } from '../../src/deploy-commands.js';
 
 const CLIENT_ID = '900000000000000001';
 const DEV_GUILD_ID = '100000000000000009';
 
-function command(name: string): Command {
+function command(name: string, description = `The ${name} command`): Command {
   return {
-    data: { name, toJSON: () => ({ name, description: `The ${name} command` }) },
+    data: { name, toJSON: () => ({ name, description }) },
     execute: () => Promise.resolve(),
   };
 }
 
 function fakeRest(): { put: ReturnType<typeof vi.fn<REST['put']>> } {
   return { put: vi.fn<REST['put']>(() => Promise.resolve([])) };
+}
+
+function loaded(...list: Command[]): () => Promise<Collection<string, Command>> {
+  return () => Promise.resolve(new Collection(list.map((item) => [item.data.name, item] as const)));
 }
 
 const commands = [command('dailygift'), command('help')];
@@ -26,6 +31,7 @@ const body = [
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
 });
 
 describe('deployCommands', () => {
@@ -65,5 +71,53 @@ describe('deployCommands', () => {
 
     expect(error).not.toHaveBeenCalled();
     expect(process.exitCode ?? 0).toBe(0);
+  });
+});
+
+describe('commandDefinitions', () => {
+  it('is the body that deployCommands sends, on one line', async () => {
+    const rest = fakeRest();
+    await deployCommands(rest, { DISCORD_CLIENT_ID: CLIENT_ID, DEV_GUILD_ID: undefined }, commands);
+
+    const text = commandDefinitions(commands);
+
+    expect(text).not.toContain('\n');
+    expect(JSON.parse(text) as unknown).toEqual(rest.put.mock.calls[0]?.[1]?.body);
+  });
+
+  it('gives the same text for the same definitions', () => {
+    expect(commandDefinitions([command('dailygift'), command('help')])).toBe(
+      commandDefinitions(commands),
+    );
+  });
+
+  it('changes when a definition changes', () => {
+    const before = commandDefinitions(commands);
+
+    expect(commandDefinitions([command('dailygift'), command('help', 'Rules')])).not.toBe(before);
+    expect(commandDefinitions([command('dailygift')])).not.toBe(before);
+  });
+});
+
+describe('main', () => {
+  it('prints the definitions with --print, without the Discord values', async () => {
+    vi.stubEnv('DISCORD_TOKEN', undefined);
+    vi.stubEnv('DISCORD_CLIENT_ID', undefined);
+    const written: string[] = [];
+
+    await main([PRINT_FLAG], loaded(...commands), (text) => written.push(text));
+
+    expect(written).toEqual([`${commandDefinitions(commands)}\n`]);
+  });
+
+  it('needs the Discord values to register', async () => {
+    vi.stubEnv('DISCORD_TOKEN', undefined);
+    vi.stubEnv('DISCORD_CLIENT_ID', undefined);
+    const written: string[] = [];
+
+    await expect(main([], loaded(...commands), (text) => written.push(text))).rejects.toThrow(
+      EnvError,
+    );
+    expect(written).toEqual([]);
   });
 });

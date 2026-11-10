@@ -336,6 +336,19 @@ Describe 'Invoke-NativeCommand' {
         $result = Invoke-NativeCommand -FilePath 'findstr.exe' -ArgumentList @('x') -InputText "axb`nccc" -Capture
         $result.Output | Should -Be @('axb')
     }
+
+    It 'gives environment variables to the child only' {
+        $name = 'ALLIN_SETUP_TEST_VARIABLE'
+        [Environment]::SetEnvironmentVariable($name, 'before', 'Process')
+        try {
+            $result = Invoke-NativeCommand -FilePath 'cmd.exe' -ArgumentList @('/c', "echo %$name%") -Environment @{ $name = 'child' } -Capture
+            $result.Output | Should -Be @('child')
+            [Environment]::GetEnvironmentVariable($name, 'Process') | Should -BeExactly 'before'
+        }
+        finally {
+            [Environment]::SetEnvironmentVariable($name, $null, 'Process')
+        }
+    }
 }
 
 Describe 'Argument helpers' {
@@ -432,6 +445,38 @@ Describe 'Get-DatabaseContainerId' {
         }
         Get-DatabaseContainerId | Should -BeNullOrEmpty
     }
+
+    It 'looks for the compose project and service of the database' {
+        Mock -ModuleName 'AllIn.Setup' Invoke-NativeCommand { [pscustomobject]@{ ExitCode = 0; Output = @() } }
+        Get-DatabaseContainerId -IncludeStopped | Out-Null
+        Should -Invoke -ModuleName 'AllIn.Setup' Invoke-NativeCommand -Times 1 -Exactly -ParameterFilter {
+            ($ArgumentList -join ' ') -eq 'ps -q -a --filter label=com.docker.compose.project=all-in-db --filter label=com.docker.compose.service=postgres'
+        }
+    }
+}
+
+Describe 'Docker lookups for the bot' {
+    It 'finds a running container by compose project and service' {
+        Mock -ModuleName 'AllIn.Setup' Invoke-NativeCommand { [pscustomobject]@{ ExitCode = 0; Output = @('0123456789ab') } }
+        Get-ComposeContainerId -Project 'all-in' -Service 'bot' | Should -BeExactly '0123456789ab'
+        Should -Invoke -ModuleName 'AllIn.Setup' Invoke-NativeCommand -Times 1 -Exactly -ParameterFilter {
+            ($ArgumentList -join ' ') -eq 'ps -q --filter label=com.docker.compose.project=all-in --filter label=com.docker.compose.service=bot'
+        }
+    }
+
+    It 'returns the id of an image and nothing for a missing one' {
+        Mock -ModuleName 'AllIn.Setup' Invoke-NativeCommand { [pscustomobject]@{ ExitCode = 0; Output = @('WARNING: x', ('sha256:' + ('ab' * 32))) } }
+        Get-DockerImageId -Name 'all-in-bot' | Should -BeExactly ('sha256:' + ('ab' * 32))
+        Mock -ModuleName 'AllIn.Setup' Invoke-NativeCommand { [pscustomobject]@{ ExitCode = 1; Output = @('Error: No such image: all-in-bot') } }
+        Get-DockerImageId -Name 'all-in-bot' | Should -BeNullOrEmpty
+    }
+
+    It 'reads the health of a container, or its state without a healthcheck' {
+        Mock -ModuleName 'AllIn.Setup' Invoke-NativeCommand { [pscustomobject]@{ ExitCode = 0; Output = @('healthy') } }
+        Get-ContainerHealth -ContainerId 'c1' | Should -BeExactly 'healthy'
+        Mock -ModuleName 'AllIn.Setup' Invoke-NativeCommand { [pscustomobject]@{ ExitCode = 1; Output = @('Error') } }
+        Get-ContainerHealth -ContainerId 'c1' | Should -BeExactly 'unknown'
+    }
 }
 
 Describe 'Setup state' {
@@ -485,5 +530,528 @@ Describe 'Test-TcpPort' {
             $listener.Stop()
         }
         Test-TcpPort -HostName '127.0.0.1' -Port $port -TimeoutMilliseconds 2000 | Should -BeFalse
+    }
+}
+
+Describe 'Bot settings' {
+    It 'lists the required keys that are empty or absent' {
+        Get-MissingBotKey -Value ([ordered]@{ DATABASE_URL = 'postgresql://x'; DISCORD_TOKEN = '  '; DEV_GUILD_ID = '1' }) |
+            Should -Be @('DISCORD_TOKEN', 'DISCORD_CLIENT_ID')
+        @(Get-MissingBotKey -Value @{ DATABASE_URL = 'u'; DISCORD_TOKEN = 't'; DISCORD_CLIENT_ID = 'c' }).Count | Should -Be 0
+    }
+
+    It 'accepts an application ID of 17 to 20 digits only: <Value>' -ForEach @(
+        @{ Value = '123456789012345678'; Expected = $true }
+        @{ Value = '12345678901234567'; Expected = $true }
+        @{ Value = '1234567890123456'; Expected = $false }
+        @{ Value = '123456789012345678901'; Expected = $false }
+        @{ Value = '12345678901234567x'; Expected = $false }
+        @{ Value = ''; Expected = $false }
+    ) {
+        Test-DiscordId -Value $Value | Should -Be $Expected
+    }
+
+    It 'accepts a bot token, not a client secret or a public key: <Value>' -ForEach @(
+        @{ Value = 'MTIzNDU2Nzg5MDEyMzQ1Njc4.GaBcDe.fake_token-Value123'; Expected = $true }
+        @{ Value = 'abcdefghijklmnopqrstuvwxyz012345'; Expected = $false }
+        @{ Value = 'MTIz.Ga Bc.x'; Expected = $false }
+        @{ Value = 'Bot MTIz.GaBc.x'; Expected = $false }
+        @{ Value = ''; Expected = $false }
+    ) {
+        Test-DiscordToken -Value $Value | Should -Be $Expected
+    }
+}
+
+Describe 'Merge-BotEnvText' {
+    It 'fills the template with the production values and keeps none of its example values' {
+        $template = "# Discord`nDISCORD_TOKEN=your-token`nDISCORD_CLIENT_ID=`nDEV_GUILD_ID=100000000000000009`n`n# Database`n" +
+            "DATABASE_URL=postgresql://user:password@localhost:5432/allin`nTEST_DATABASE_URL=postgresql://user:password@localhost:5432/allin_test`n`n" +
+            "DAILY_RESET_TIMEZONE=Europe/Amsterdam`nLOG_LEVEL=info`n"
+        $text = Merge-BotEnvText -Text $template -FromTemplate -Values ([ordered]@{ DATABASE_URL = 'postgresql://allin:s@host.docker.internal:5432/allin'; DISCORD_TOKEN = '' })
+        $values = ConvertFrom-EnvText -Text $text
+        $values['DATABASE_URL'] | Should -BeExactly 'postgresql://allin:s@host.docker.internal:5432/allin'
+        $values['DISCORD_TOKEN'] | Should -BeExactly ''
+        $values['DISCORD_CLIENT_ID'] | Should -BeExactly ''
+        $values['DEV_GUILD_ID'] | Should -BeExactly ''
+        $values['TEST_DATABASE_URL'] | Should -BeExactly ''
+        $values['DAILY_RESET_TIMEZONE'] | Should -BeExactly 'Europe/Amsterdam'
+        $values['LOG_LEVEL'] | Should -BeExactly 'info'
+        $text | Should -Match '^# All-in production bot\.'
+        $text | Should -Match '(?m)^# Database$'
+    }
+
+    It 'never overwrites a filled value of an existing file' {
+        $existing = "DATABASE_URL=postgresql://kept`nDISCORD_TOKEN=`nLOG_LEVEL=debug`n"
+        $values = [ordered]@{ DATABASE_URL = 'postgresql://new'; DISCORD_TOKEN = 'a.b.c'; DISCORD_CLIENT_ID = '123456789012345678' }
+        Merge-BotEnvText -Text $existing -Values $values |
+            Should -BeExactly "DATABASE_URL=postgresql://kept`nDISCORD_TOKEN=a.b.c`nLOG_LEVEL=debug`nDISCORD_CLIENT_ID=123456789012345678`n"
+    }
+}
+
+Describe 'Write-BotEnvFile' {
+    BeforeEach {
+        $script:envPath = Join-Path $TestDrive ('bot-{0}.env' -f [guid]::NewGuid().ToString('N'))
+    }
+
+    It 'creates bot.env private, as UTF-8 without BOM and with LF' {
+        $result = Write-BotEnvFile -Path $script:envPath -Template "LOG_LEVEL=info`r`n" -Values ([ordered]@{ DISCORD_TOKEN = 'a.b.c' })
+        $result.Created | Should -BeTrue
+        Test-SecretFileProtected -Path $script:envPath | Should -BeTrue
+        $bytes = [System.IO.File]::ReadAllBytes($script:envPath)
+        $bytes[0] | Should -Not -Be 0xEF
+        $bytes | Should -Not -Contain 13
+        (Read-EnvFile -Path $script:envPath)['DISCORD_TOKEN'] | Should -BeExactly 'a.b.c'
+    }
+
+    It 'keeps every value of an existing file and fills only the empty ones' {
+        Write-Utf8LfFile -Path $script:envPath -Text "DISCORD_TOKEN=kept.token.value`nDISCORD_CLIENT_ID=`n"
+        Protect-SecretFile -Path $script:envPath
+        $values = [ordered]@{ DISCORD_TOKEN = 'new.token.value'; DISCORD_CLIENT_ID = '123456789012345678' }
+        $result = Write-BotEnvFile -Path $script:envPath -Template 'IGNORED=1' -Values $values
+        $result.Created | Should -BeFalse
+        $result.Restricted | Should -BeFalse
+        [System.IO.File]::ReadAllText($script:envPath) | Should -BeExactly "DISCORD_TOKEN=kept.token.value`nDISCORD_CLIENT_ID=123456789012345678`n"
+    }
+
+    It 'restricts an existing file that others can read' {
+        Set-Content -LiteralPath $script:envPath -Value 'DISCORD_TOKEN=a.b.c'
+        $result = Write-BotEnvFile -Path $script:envPath -Template '' -Values @{}
+        $result.Restricted | Should -BeTrue
+        Test-SecretFileProtected -Path $script:envPath | Should -BeTrue
+        (Read-EnvFile -Path $script:envPath)['DISCORD_TOKEN'] | Should -BeExactly 'a.b.c'
+    }
+}
+
+Describe 'Invoke-BotCompose' {
+    It 'runs docker compose for the project all-in, with bot.env in forward slashes and an empty stdin' {
+        Mock -ModuleName 'AllIn.Setup' Invoke-NativeCommand { [pscustomobject]@{ ExitCode = 0; Output = @('done') } }
+        $run = Invoke-BotCompose -RepoRoot 'C:\src\all-in' -DataDir 'D:\my data' -Command @('up', '--detach') -Secret @('s3cr3t-value') -Capture
+        $run.Output | Should -Be @('done')
+        Should -Invoke -ModuleName 'AllIn.Setup' Invoke-NativeCommand -Times 1 -Exactly -ParameterFilter {
+            $FilePath -eq 'docker' -and
+            ($ArgumentList -join '|') -eq 'compose|--project-name|all-in|--file|C:\src\all-in\deploy\compose.yaml|up|--detach' -and
+            $Environment['ALLIN_BOT_ENV_FILE'] -eq 'D:/my data/bot.env' -and
+            $InputText -eq '' -and $Secret -contains 's3cr3t-value' -and $Capture
+        }
+    }
+
+    It 'adds extra variables for the child process next to bot.env' {
+        Mock -ModuleName 'AllIn.Setup' Invoke-NativeCommand { [pscustomobject]@{ ExitCode = 0; Output = @() } }
+        Invoke-BotCompose -RepoRoot 'C:\src\all-in' -DataDir 'D:\data' -Command @('build', 'bot') -Environment @{ BUILDX_NO_DEFAULT_ATTESTATIONS = '1' } | Out-Null
+        Should -Invoke -ModuleName 'AllIn.Setup' Invoke-NativeCommand -Times 1 -Exactly -ParameterFilter {
+            $Environment.Count -eq 2 -and $Environment['ALLIN_BOT_ENV_FILE'] -eq 'D:/data/bot.env' -and $Environment['BUILDX_NO_DEFAULT_ATTESTATIONS'] -eq '1'
+        }
+    }
+}
+
+Describe 'Command definitions' {
+    It 'finds the JSON array among the lines of docker compose' {
+        $output = @(
+            ' Network all-in_default  Creating'
+            '[+] Running 1/1'
+            '{"level":30,"msg":"loaded"}'
+            '[{"name":"balance","description":"Balance"},{"name":"help","description":"Rules"}]'
+        )
+        $definition = Get-CommandDefinition -Output $output
+        $definition.Json | Should -BeExactly '[{"name":"balance","description":"Balance"},{"name":"help","description":"Rules"}]'
+        $definition.Count | Should -Be 2
+    }
+
+    It 'counts one definition and none' {
+        (Get-CommandDefinition -Output @('[{"name":"help"}]')).Count | Should -Be 1
+        (Get-CommandDefinition -Output @('[]')).Count | Should -Be 0
+    }
+
+    It 'returns nothing without a valid JSON array' {
+        Get-CommandDefinition -Output @('[+] Running 1/1', '[{"name":}]', 'Error: no such service') | Should -BeNullOrEmpty
+        Get-CommandDefinition -Output @() | Should -BeNullOrEmpty
+    }
+
+    It 'hashes the definitions together with the application and server they are registered for' {
+        # sha256 of "1`n`n[]", checked with Node's crypto module.
+        $hash = Get-CommandDefinitionHash -Json '[]' -ClientId '1' -GuildId ''
+        $hash | Should -BeExactly '0b54edcca5f139b5e9f4764f2ce4371050e232501fcb61df82e477894cabb7f2'
+        Get-CommandDefinitionHash -Json '[{"name":"help"}]' -ClientId '1' -GuildId '' | Should -Not -Be $hash
+        Get-CommandDefinitionHash -Json '[]' -ClientId '2' -GuildId '' | Should -Not -Be $hash
+        Get-CommandDefinitionHash -Json '[]' -ClientId '1' -GuildId '3' | Should -Not -Be $hash
+    }
+}
+
+Describe 'Invoke-BotDeployment' {
+    BeforeAll {
+        $script:token = 'MTIzNDU2Nzg5MDEyMzQ1Njc4.GaBcDe.fake_token-Value123'
+        $script:clientId = '123456789012345678'
+        $script:definitions = '[{"name":"balance","description":"Balance"},{"name":"help","description":"Rules"}]'
+        $script:expectedHash = Get-CommandDefinitionHash -Json $script:definitions -ClientId $script:clientId -GuildId ''
+        $script:expectedUrl = 'postgresql://allin:p%40ss%3Aw%2Frd@host.docker.internal:5432/allin'
+        $script:template = "# Discord`nDISCORD_TOKEN=`nDISCORD_CLIENT_ID=`nDEV_GUILD_ID=`n`n# Database`nDATABASE_URL=`nTEST_DATABASE_URL=`n`n" +
+            "DAILY_RESET_TIMEZONE=Europe/Amsterdam`nLOG_LEVEL=info`n"
+
+        function script:Invoke-Deployment {
+            param([switch]$CheckOnly, [switch]$NonInteractive, [switch]$NoDatabase)
+            Invoke-BotDeployment -Results $script:results -RepoRoot $script:repoDir -DataDir $script:dataDir -Port 5432 `
+                -State $script:state -StatePath $script:statePath -Secret @('DbSecretValue') -CheckOnly:$CheckOnly `
+                -NonInteractive:$NonInteractive -DataReady -DockerReady -DatabaseReady:(-not $NoDatabase)
+        }
+
+        function script:Get-ResultSummary {
+            @($script:results | ForEach-Object { '{0}={1}' -f $_.Name, $_.Status })
+        }
+
+        function script:Get-ResultFor {
+            param([string]$Name)
+            @($script:results | Where-Object { $_.Name -eq $Name })[0]
+        }
+
+        function script:Write-CompleteBotEnv {
+            $path = Join-Path $script:dataDir 'bot.env'
+            Write-Utf8LfFile -Path $path -Text ("DATABASE_URL={0}`nDISCORD_TOKEN={1}`nDISCORD_CLIENT_ID={2}`nDEV_GUILD_ID=`n" -f $script:expectedUrl, $script:token, $script:clientId)
+            Protect-SecretFile -Path $path
+        }
+
+        function script:Read-BotEnv {
+            Read-EnvFile -Path (Join-Path $script:dataDir 'bot.env')
+        }
+    }
+
+    BeforeEach {
+        $root = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
+        $script:repoDir = Join-Path $root 'repo'
+        $script:dataDir = Join-Path $root 'data'
+        $script:statePath = Join-Path $root 'state.json'
+        New-Item -ItemType Directory -Path $script:repoDir, $script:dataDir | Out-Null
+        Write-Utf8LfFile -Path (Join-Path $script:repoDir '.env.example') -Text $script:template
+        Write-Utf8LfFile -Path (Join-Path $script:dataDir '.env') -Text "POSTGRES_PASSWORD=x1`nALLIN_PASSWORD=p@ss:w/rd`nALLIN_DEV_PASSWORD=y1`n"
+        $script:results = New-Object System.Collections.Generic.List[object]
+        $script:state = @{}
+        $script:imageIds = New-Object System.Collections.Queue
+        $script:containerIds = New-Object System.Collections.Queue
+        $script:exitCodes = @{ build = 0; register = 0; up = 0 }
+
+        Mock -ModuleName 'AllIn.Setup' Write-Host {}
+        Mock -ModuleName 'AllIn.Setup' Read-SecretValue { $script:token }
+        Mock -ModuleName 'AllIn.Setup' Read-Host { $script:clientId }
+        Mock -ModuleName 'AllIn.Setup' Get-DockerImageId { $script:imageIds.Dequeue() }
+        Mock -ModuleName 'AllIn.Setup' Get-ComposeContainerId { $script:containerIds.Dequeue() }
+        Mock -ModuleName 'AllIn.Setup' Get-ContainerHealth { 'healthy' }
+        Mock -ModuleName 'AllIn.Setup' Invoke-BotCompose { [pscustomobject]@{ ExitCode = $script:exitCodes['build']; Output = @() } } -ParameterFilter {
+            $Command[0] -eq 'build'
+        }
+        Mock -ModuleName 'AllIn.Setup' Invoke-BotCompose { [pscustomobject]@{ ExitCode = 0; Output = @('[+] Running 1/1', $script:definitions) } } -ParameterFilter {
+            $Command -contains '--print'
+        }
+        Mock -ModuleName 'AllIn.Setup' Invoke-BotCompose { [pscustomobject]@{ ExitCode = $script:exitCodes['register']; Output = @() } } -ParameterFilter {
+            $Command[0] -eq 'run' -and $Command -notcontains '--print'
+        }
+        Mock -ModuleName 'AllIn.Setup' Invoke-BotCompose { [pscustomobject]@{ ExitCode = $script:exitCodes['up']; Output = @() } } -ParameterFilter {
+            $Command[0] -eq 'up'
+        }
+    }
+
+    It 'on a first run writes bot.env from the answers, builds, registers the commands and starts the bot' {
+        $script:imageIds.Enqueue($null)
+        $script:imageIds.Enqueue('sha256:new')
+        $script:containerIds.Enqueue($null)
+        $script:containerIds.Enqueue('c2')
+
+        Invoke-Deployment
+
+        Get-ResultSummary | Should -Be @('bot.env=INSTALLED', 'Bot image=INSTALLED', 'Slash commands=INSTALLED', 'Bot container=INSTALLED')
+        (Get-ResultFor -Name 'Slash commands').Message | Should -BeExactly 'registered 2 commands globally'
+        $values = Read-BotEnv
+        $values['DATABASE_URL'] | Should -BeExactly $script:expectedUrl
+        $values['DISCORD_TOKEN'] | Should -BeExactly $script:token
+        $values['DISCORD_CLIENT_ID'] | Should -BeExactly $script:clientId
+        $values['DEV_GUILD_ID'] | Should -BeExactly ''
+        $values['TEST_DATABASE_URL'] | Should -BeExactly ''
+        Test-SecretFileProtected -Path (Join-Path $script:dataDir 'bot.env') | Should -BeTrue
+        (Read-SetupState -Path $script:statePath)['botCommandsHash'] | Should -BeExactly $script:expectedHash
+        Should -Invoke -ModuleName 'AllIn.Setup' Invoke-BotCompose -Times 1 -Exactly -ParameterFilter {
+            $Command[0] -eq 'run' -and $Command -notcontains '--print' -and $Secret -contains $script:token
+        }
+        Should -Invoke -ModuleName 'AllIn.Setup' Write-Host -Times 0 -Exactly -ParameterFilter { "$Object" -match 'fake_token|p@ss|p%40ss' }
+    }
+
+    It 'with nothing changed reports OK, without prompting or registering' {
+        Write-CompleteBotEnv
+        $script:state['botCommandsHash'] = $script:expectedHash
+        $script:imageIds.Enqueue('sha256:same')
+        $script:imageIds.Enqueue('sha256:same')
+        $script:containerIds.Enqueue('c1')
+        $script:containerIds.Enqueue('c1')
+
+        Invoke-Deployment
+
+        Get-ResultSummary | Should -Be @('bot.env=OK', 'Bot image=OK', 'Slash commands=OK', 'Bot container=OK')
+        Should -Invoke -ModuleName 'AllIn.Setup' Read-SecretValue -Times 0 -Exactly
+        Should -Invoke -ModuleName 'AllIn.Setup' Read-Host -Times 0 -Exactly
+        Should -Invoke -ModuleName 'AllIn.Setup' Invoke-BotCompose -Times 0 -Exactly -ParameterFilter { $Command[0] -eq 'run' -and $Command -notcontains '--print' }
+        Should -Invoke -ModuleName 'AllIn.Setup' Invoke-BotCompose -Times 1 -Exactly -ParameterFilter { $Command[0] -eq 'up' }
+    }
+
+    It 'registers the commands again when their definitions changed' {
+        Write-CompleteBotEnv
+        $script:state['botCommandsHash'] = 'the hash of older definitions'
+        $script:imageIds.Enqueue('sha256:old')
+        $script:imageIds.Enqueue('sha256:new')
+        $script:containerIds.Enqueue('c1')
+        $script:containerIds.Enqueue('c2')
+
+        Invoke-Deployment
+
+        Get-ResultSummary | Should -Be @('bot.env=OK', 'Bot image=INSTALLED', 'Slash commands=INSTALLED', 'Bot container=INSTALLED')
+        Should -Invoke -ModuleName 'AllIn.Setup' Invoke-BotCompose -Times 1 -Exactly -ParameterFilter { $Command[0] -eq 'run' -and $Command -notcontains '--print' }
+        $script:state['botCommandsHash'] | Should -BeExactly $script:expectedHash
+    }
+
+    It 'keeps the values of an existing bot.env and asks only for the missing one' {
+        $path = Join-Path $script:dataDir 'bot.env'
+        Write-Utf8LfFile -Path $path -Text "DATABASE_URL=postgresql://allin:kept@db.example:5433/allin`nDISCORD_TOKEN=`nDISCORD_CLIENT_ID=999999999999999999`n"
+        Protect-SecretFile -Path $path
+        $script:imageIds.Enqueue('sha256:same')
+        $script:imageIds.Enqueue('sha256:same')
+        $script:containerIds.Enqueue('c1')
+        $script:containerIds.Enqueue('c1')
+
+        Invoke-Deployment
+
+        $values = Read-BotEnv
+        $values['DATABASE_URL'] | Should -BeExactly 'postgresql://allin:kept@db.example:5433/allin'
+        $values['DISCORD_CLIENT_ID'] | Should -BeExactly '999999999999999999'
+        $values['DISCORD_TOKEN'] | Should -BeExactly $script:token
+        (Get-ResultFor -Name 'bot.env').Message | Should -BeExactly "${path}: filled in DISCORD_TOKEN"
+        Should -Invoke -ModuleName 'AllIn.Setup' Read-SecretValue -Times 1 -Exactly
+        Should -Invoke -ModuleName 'AllIn.Setup' Read-Host -Times 0 -Exactly
+    }
+
+    It 'with -NonInteractive fills in what it can, never prompts and stops before Docker' {
+        Invoke-Deployment -NonInteractive
+
+        Get-ResultSummary | Should -Be @('bot.env=ACTION', 'Bot image=SKIPPED', 'Slash commands=SKIPPED', 'Bot container=SKIPPED')
+        (Get-ResultFor -Name 'bot.env').Message | Should -BeLike 'fill in DISCORD_TOKEN, DISCORD_CLIENT_ID in *bot.env, then run setup.cmd again'
+        (Get-ResultFor -Name 'Bot image').Message | Should -BeExactly 'needs a complete bot.env (above)'
+        $values = Read-BotEnv
+        $values['DATABASE_URL'] | Should -BeExactly $script:expectedUrl
+        $values['DISCORD_TOKEN'] | Should -BeExactly ''
+        Should -Invoke -ModuleName 'AllIn.Setup' Read-SecretValue -Times 0 -Exactly
+        Should -Invoke -ModuleName 'AllIn.Setup' Read-Host -Times 0 -Exactly
+        Should -Invoke -ModuleName 'AllIn.Setup' Invoke-BotCompose -Times 0 -Exactly
+    }
+
+    It 'does not save an answer that is not a bot token' {
+        Mock -ModuleName 'AllIn.Setup' Read-SecretValue { 'abcdefghijklmnopqrstuvwxyz012345' }
+
+        Invoke-Deployment
+
+        Get-ResultSummary | Should -Be @('bot.env=ACTION', 'Bot image=SKIPPED', 'Slash commands=SKIPPED', 'Bot container=SKIPPED')
+        $values = Read-BotEnv
+        $values['DISCORD_TOKEN'] | Should -BeExactly ''
+        $values['DISCORD_CLIENT_ID'] | Should -BeExactly $script:clientId
+    }
+
+    It 'leaves the running bot alone when the build fails' {
+        Write-CompleteBotEnv
+        $script:imageIds.Enqueue('sha256:old')
+        $script:exitCodes['build'] = 1
+
+        Invoke-Deployment
+
+        Get-ResultSummary | Should -Be @('bot.env=OK', 'Bot image=FAILED', 'Slash commands=SKIPPED', 'Bot container=SKIPPED')
+        (Get-ResultFor -Name 'Bot container').Message | Should -BeExactly 'needs the image (above); the running bot was left alone'
+        Should -Invoke -ModuleName 'AllIn.Setup' Invoke-BotCompose -Times 1 -Exactly
+    }
+
+    It 'does not restart the bot when registering the commands fails' {
+        Write-CompleteBotEnv
+        $script:imageIds.Enqueue('sha256:old')
+        $script:imageIds.Enqueue('sha256:new')
+        $script:exitCodes['register'] = 1
+
+        Invoke-Deployment
+
+        Get-ResultSummary | Should -Be @('bot.env=OK', 'Bot image=INSTALLED', 'Slash commands=FAILED', 'Bot container=SKIPPED')
+        Should -Invoke -ModuleName 'AllIn.Setup' Invoke-BotCompose -Times 0 -Exactly -ParameterFilter { $Command[0] -eq 'up' }
+        $script:state.ContainsKey('botCommandsHash') | Should -BeFalse
+        $script:statePath | Should -Not -Exist
+    }
+
+    It 'shows the command for the log when the bot does not come online' {
+        Write-CompleteBotEnv
+        $script:state['botCommandsHash'] = $script:expectedHash
+        $script:imageIds.Enqueue('sha256:same')
+        $script:imageIds.Enqueue('sha256:same')
+        $script:containerIds.Enqueue('c1')
+        $script:exitCodes['up'] = 1
+
+        Invoke-Deployment
+
+        $container = Get-ResultFor -Name 'Bot container'
+        $container.Status | Should -BeExactly 'FAILED'
+        @($container.Hint) | Should -Be @('Its log says why: docker logs --tail 100 all-in-bot-1')
+    }
+
+    It 'waits for the roles and databases before any Docker work' {
+        Write-CompleteBotEnv
+
+        Invoke-Deployment -NoDatabase
+
+        Get-ResultSummary | Should -Be @('bot.env=OK', 'Bot image=SKIPPED', 'Slash commands=SKIPPED', 'Bot container=SKIPPED')
+        (Get-ResultFor -Name 'Bot image').Message | Should -BeExactly 'needs the roles and databases (step 5)'
+        Should -Invoke -ModuleName 'AllIn.Setup' Invoke-BotCompose -Times 0 -Exactly
+    }
+
+    It 'builds the image without default attestations, so an unchanged build keeps its image id' {
+        Write-CompleteBotEnv
+        $script:state['botCommandsHash'] = $script:expectedHash
+        $script:imageIds.Enqueue('sha256:same')
+        $script:imageIds.Enqueue('sha256:same')
+        $script:containerIds.Enqueue('c1')
+        $script:containerIds.Enqueue('c1')
+
+        Invoke-Deployment
+
+        Should -Invoke -ModuleName 'AllIn.Setup' Invoke-BotCompose -Times 1 -Exactly -ParameterFilter {
+            $Command[0] -eq 'build' -and $Environment['BUILDX_NO_DEFAULT_ATTESTATIONS'] -eq '1'
+        }
+    }
+
+    It 'with -CheckOnly reports and changes nothing' {
+        $script:containerIds.Enqueue($null)
+
+        Invoke-Deployment -CheckOnly
+
+        Get-ResultSummary | Should -Be @('bot.env=ACTION', 'Bot image=SKIPPED', 'Slash commands=SKIPPED', 'Bot container=ACTION')
+        Join-Path $script:dataDir 'bot.env' | Should -Not -Exist
+        $script:statePath | Should -Not -Exist
+        Should -Invoke -ModuleName 'AllIn.Setup' Read-SecretValue -Times 0 -Exactly
+        Should -Invoke -ModuleName 'AllIn.Setup' Read-Host -Times 0 -Exactly
+        Should -Invoke -ModuleName 'AllIn.Setup' Invoke-BotCompose -Times 0 -Exactly
+    }
+
+    It 'with -CheckOnly reports a bot that is logged in' {
+        Write-CompleteBotEnv
+        $script:containerIds.Enqueue('c1')
+
+        Invoke-Deployment -CheckOnly
+
+        Get-ResultSummary | Should -Be @('bot.env=OK', 'Bot image=SKIPPED', 'Slash commands=SKIPPED', 'Bot container=OK')
+    }
+}
+
+Describe 'Get-HostMigrationPlan' {
+    It 'migrates allin, allin_dev and allin_test on the host without the bot' {
+        $plan = Get-HostMigrationPlan
+        @($plan.Targets | ForEach-Object { '{0}/{1}/{2}' -f $_.Database, $_.Role, $_.SecretKey }) |
+            Should -Be @('allin/allin/ALLIN_PASSWORD', 'allin_dev/allin_dev/ALLIN_DEV_PASSWORD', 'allin_test/allin_dev/ALLIN_DEV_PASSWORD')
+        $plan.Summary | Should -BeExactly 'allin, allin_dev and allin_test are up to date'
+    }
+
+    It 'leaves allin to the bot container, which migrates it after compose has stopped the old bot' {
+        $plan = Get-HostMigrationPlan -WithBot
+        @($plan.Targets | ForEach-Object { '{0}/{1}/{2}' -f $_.Database, $_.Role, $_.SecretKey }) |
+            Should -Be @('allin_dev/allin_dev/ALLIN_DEV_PASSWORD', 'allin_test/allin_dev/ALLIN_DEV_PASSWORD')
+        $plan.Summary | Should -BeExactly 'allin_dev and allin_test are up to date; allin is migrated by the bot container when it starts (step 9)'
+    }
+}
+
+Describe 'Test-BotDatabaseReady' {
+    It 'is <Expected> for <Case>' -ForEach @(
+        @{ Case = 'roles OK and migrations FAILED'; Steps = @('Roles and databases=OK', 'npm packages=OK', 'Migrations=FAILED'); Expected = $true }
+        @{ Case = 'roles INSTALLED and npm packages FAILED'; Steps = @('Roles and databases=INSTALLED', 'npm packages=FAILED', 'Migrations=SKIPPED'); Expected = $true }
+        @{ Case = 'roles SKIPPED'; Steps = @('PostgreSQL=FAILED', 'Roles and databases=SKIPPED', 'Migrations=SKIPPED'); Expected = $false }
+        @{ Case = 'roles FAILED'; Steps = @('Roles and databases=FAILED', 'Migrations=OK'); Expected = $false }
+        @{ Case = 'no roles step'; Steps = @('npm packages=OK', 'Migrations=OK'); Expected = $false }
+        @{ Case = 'no results'; Steps = @(); Expected = $false }
+    ) {
+        $list = New-Object System.Collections.Generic.List[object]
+        foreach ($step in $Steps) {
+            $stepName, $stepStatus = $step.Split('=')
+            Add-SetupResult -List $list -Name $stepName -Status $stepStatus -Quiet
+        }
+        Test-BotDatabaseReady -Results $list.ToArray() | Should -Be $Expected
+    }
+}
+
+Describe 'Get-RunningBotContainerId' {
+    It 'looks for the running bot container when the database is allin' {
+        Mock -ModuleName 'AllIn.Setup' Invoke-NativeCommand { [pscustomobject]@{ ExitCode = 0; Output = @('0123456789ab') } }
+        Get-RunningBotContainerId -Database 'allin' | Should -BeExactly '0123456789ab'
+        Should -Invoke -ModuleName 'AllIn.Setup' Invoke-NativeCommand -Times 1 -Exactly -ParameterFilter {
+            ($ArgumentList -join ' ') -eq 'ps -q --filter label=com.docker.compose.project=all-in --filter label=com.docker.compose.service=bot'
+        }
+    }
+
+    It 'does not look for the bot for <Database>' -ForEach @(@{ Database = 'allin_dev' }, @{ Database = 'allin_test' }) {
+        Mock -ModuleName 'AllIn.Setup' Invoke-NativeCommand { [pscustomobject]@{ ExitCode = 0; Output = @('0123456789ab') } }
+        Get-RunningBotContainerId -Database $Database | Should -BeNullOrEmpty
+        Should -Invoke -ModuleName 'AllIn.Setup' Invoke-NativeCommand -Times 0 -Exactly
+    }
+}
+
+Describe 'Invoke-DatabaseRestore' {
+    BeforeAll {
+        $script:dumpName = 'allin-20261109-033000.dump'
+        $script:restoreArguments = "exec db1 pg_restore -U postgres --clean --if-exists --single-transaction -d allin /backups/$script:dumpName"
+
+        function script:Invoke-Restore {
+            param([string]$Database = 'allin', [string]$Owner = 'allin', [string]$BotContainerId = 'bot1')
+            Invoke-DatabaseRestore -ContainerId 'db1' -Database $Database -Owner $Owner -DumpName $script:dumpName -BotContainerId $BotContainerId
+        }
+    }
+
+    BeforeEach {
+        $script:calls = New-Object System.Collections.Generic.List[string]
+        $script:dockerExitCodes = @{ stop = 0; exec = 0; start = 0 }
+        $script:restoreThrows = $false
+        Mock -ModuleName 'AllIn.Setup' Write-Host {}
+        Mock -ModuleName 'AllIn.Setup' Invoke-NativeCommand {
+            $script:calls.Add($ArgumentList -join ' ')
+            if ($ArgumentList[0] -eq 'exec' -and $script:restoreThrows) { throw 'the Docker engine went away' }
+            [pscustomobject]@{ ExitCode = $script:dockerExitCodes[$ArgumentList[0]]; Output = @() }
+        }
+    }
+
+    It 'stops the bot, restores allin and starts the bot again' {
+        Invoke-Restore | Should -Be 0
+        @($script:calls) | Should -Be @('stop bot1', $script:restoreArguments, 'start bot1')
+        Should -Invoke -ModuleName 'AllIn.Setup' Write-Host -Times 1 -Exactly -ParameterFilter {
+            "$Object" -match '^  OK +Started the bot again \(all-in-bot-1\); it refunds the open rounds before it logs in\.$'
+        }
+    }
+
+    It 'starts the bot again after a failing restore' {
+        $script:dockerExitCodes['exec'] = 1
+        Invoke-Restore | Should -Be 1
+        @($script:calls) | Should -Be @('stop bot1', $script:restoreArguments, 'start bot1')
+    }
+
+    It 'starts the bot again when the restore throws' {
+        $script:restoreThrows = $true
+        { Invoke-Restore } | Should -Throw '*the Docker engine went away*'
+        @($script:calls) | Should -Be @('stop bot1', $script:restoreArguments, 'start bot1')
+    }
+
+    It 'restores nothing when the bot does not stop' {
+        $script:dockerExitCodes['stop'] = 1
+        Invoke-Restore | Should -Be 1
+        @($script:calls) | Should -Be @('stop bot1')
+        Should -Invoke -ModuleName 'AllIn.Setup' Write-Host -Times 1 -Exactly -ParameterFilter { "$Object" -match '^  FAILED +Nothing restored: ' }
+    }
+
+    It 'fails with the command to start the bot when it does not start again' {
+        $script:dockerExitCodes['start'] = 1
+        Invoke-Restore | Should -Be 1
+        @($script:calls) | Should -Be @('stop bot1', $script:restoreArguments, 'start bot1')
+        Should -Invoke -ModuleName 'AllIn.Setup' Write-Host -Times 1 -Exactly -ParameterFilter { "$Object" -match '^  FAILED +The bot did not start again .*: docker start all-in-bot-1$' }
+    }
+
+    It 'restores allin without a running bot exactly as before' {
+        Invoke-Restore -BotContainerId '' | Should -Be 0
+        @($script:calls) | Should -Be @($script:restoreArguments)
+    }
+
+    It 'restores <Database> as allin_dev without touching the bot' -ForEach @(@{ Database = 'allin_dev' }, @{ Database = 'allin_test' }) {
+        Invoke-Restore -Database $Database -Owner 'allin_dev' -BotContainerId '' | Should -Be 0
+        @($script:calls) | Should -Be @("exec db1 pg_restore -U postgres --clean --if-exists --single-transaction -d $Database --no-owner --no-acl --role=allin_dev /backups/$script:dumpName")
     }
 }

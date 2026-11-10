@@ -46,6 +46,21 @@ jobs:
 
       - run: npm run check
 
+  # The image the database PC builds in setup step 9: it must build and start without secrets.
+  docker-image:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - run: docker build --file deploy/Dockerfile --tag all-in-bot .
+
+      - name: Commands load inside the image
+        run: docker run --rm all-in-bot node dist/deploy-commands.js --print
+
+      - name: Node in the image has Temporal
+        run: docker run --rm all-in-bot node -e "if (typeof Temporal !== 'object') process.exit(1)"
+
   setup-scripts:
     runs-on: windows-latest
 

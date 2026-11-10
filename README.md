@@ -59,7 +59,7 @@ Every table is its own thread, such as `Table #12 (Roulette)`, so the channel st
 
 ## Windows setup
 
-One command prepares a Windows PC: the database host (a PC that runs PostgreSQL in Docker, and later the bot) or a development PC. It's plain Windows PowerShell 5.1, so it needs nothing that a fresh Windows 10 or 11 doesn't have. Design and rules: [docs/WINDOWS-SETUP.md](docs/WINDOWS-SETUP.md).
+One command prepares a Windows PC: the database host (a PC that runs PostgreSQL and the production bot in Docker) or a development PC. It's plain Windows PowerShell 5.1, so it needs nothing that a fresh Windows 10 or 11 doesn't have. Design and rules: [docs/WINDOWS-SETUP.md](docs/WINDOWS-SETUP.md).
 
 On a fresh PC, in a normal (non-administrator) PowerShell window:
 
@@ -78,7 +78,7 @@ Run it again whenever you like, for example after `git pull`: it checks everythi
 
 1. **Software and Windows settings** (`install.ps1`). Checks Windows (database host: Windows 10 22H2 or Windows 11 23H2 or later), hardware virtualization, winget, Git and Node.js (at least the version in `.nvmrc`). On the database host also WSL 2, Docker Desktop, no sleep on AC power, and an inbound firewall rule for the PostgreSQL port (local subnet, Private networks only). When a network is set to Public, it asks whether to switch it to Private. Only when something is missing does Windows ask for administrator rights, once.
 2. **The project** (`init.ps1`, as you).
-   - Database host: starts Docker Desktop when needed, keeps passwords and backups in `C:\all-in-db` (outside the repo), runs PostgreSQL 18 as the Docker project `all-in-db`, creates the roles `allin` and `allin_dev` and the databases `allin`, `allin_dev` and `allin_test`, installs the npm packages, runs the migrations, and schedules a backup of `allin` every night at 03:30 (kept 14 days).
+   - Database host: starts Docker Desktop when needed, keeps passwords and backups in `C:\all-in-db` (outside the repo), runs PostgreSQL 18 as the Docker project `all-in-db`, creates the roles `allin` and `allin_dev` and the databases `allin`, `allin_dev` and `allin_test`, installs the npm packages, runs the migrations on `allin_dev` and `allin_test`, and schedules a backup of `allin` every night at 03:30 (kept 14 days). Then it builds and (re)starts the production bot, whose container migrates `allin` when it starts; see [Deployment](#deployment).
    - Development PC: installs the npm packages, creates `.env` (it asks for the database host, the `allin_dev` password and the Discord dev values), checks that the database host answers, and runs the migrations on `allin_dev`.
 3. **Summary.** On the database host: the PC's IP and MAC address, and the two lines for the development PC's `.env`.
 
@@ -91,14 +91,14 @@ Options: `-Dev`, `-CheckOnly`, `-InstallOnly` (only part 1), `-NonInteractive` (
 | `npm run db:status` | Container, health, databases, newest backup |
 | `npm run db:logs` / `db:psql` | PostgreSQL logs / a psql shell as superuser |
 | `npm run db:backup` | Make a backup now |
-| `npm run db:restore` | Restore a dump; asks you to type the database name to confirm |
+| `npm run db:restore` | Restore a dump; asks you to type the database name to confirm. For `allin` it stops the bot during the restore and starts it again afterwards |
 | `npm run check:setup` | PSScriptAnalyzer and Pester for the setup scripts |
 
 ### After the first run (database host)
 
 - Give the PC a fixed IP address in your router: a DHCP reservation for the MAC address in the summary.
 - Docker Desktop, Settings > General: turn on "Start Docker Desktop when you sign in".
-- Optional: automatic sign-in. Docker Desktop, and so the database, only runs while you're signed in; automatic sign-in keeps it running after a power cut, but anyone with access to the PC then gets your desktop.
+- Optional: automatic sign-in. Docker Desktop, and so the database and the bot, only runs while you're signed in; automatic sign-in keeps them running after a power cut, but anyone with access to the PC then gets your desktop.
 
 ### Restarts, exit codes and logs
 
@@ -126,6 +126,8 @@ Run on a real PC; send the logs from `%LOCALAPPDATA%\all-in\logs` when something
 - [ ] **Adopting the reference script**: on a PC set up with `setup-allin-db.ps1`, `.\setup.cmd` keeps the data and passwords, renames `compose.yaml`, and `Get-ScheduledTask 'All-in database backup'` shows the new task.
 - [ ] **`-CheckOnly`**: `.\setup.cmd -CheckOnly` changes nothing (no prompt, no new files) and reports every item.
 - [ ] **`-Dev`**: on a development PC, `.\setup.cmd -Dev` installs Git and Node.js when missing, creates `.env` and runs the migrations on `allin_dev`.
+- [ ] **The bot** (database host): the first `.\setup.cmd` asks for the production token and Application ID and ends with the bot online; a second run shows only OK; after a `git pull` with code changes, the run rebuilds the image and restarts the bot.
+- [ ] **Restore with the bot online** (database host): `npm run db:restore` for `allin` says before the confirmation that it stops the bot, ends with `Started the bot again`, and `docker ps` shows `all-in-bot-1` running.
 - [ ] **Tables in threads** (Discord):
   - `/create-table` opens `Table #N` with a lobby and posts nothing in the channel;
   - Roulette in the lobby asks for bets, and after the spin the lobby returns;
@@ -177,4 +179,61 @@ src/
 
 ## Deployment
 
-_To be written._
+The production bot runs as a Docker container next to the database, on the database PC: Docker project `all-in`, image `all-in-bot`, container `all-in-bot-1`. Its settings are in `C:\all-in-db\bot.env`, outside the repo, so a re-clone keeps them.
+
+### Updating the production bot
+
+On the database PC, in a normal (non-administrator) PowerShell window, with the repo on `master`:
+
+```powershell
+cd C:\src\all-in
+git pull
+.\setup.cmd
+```
+
+Before the first run, create the production application in the Discord Developer Portal (separate from the one you develop with) and invite its bot as described in [Setup](#setup), step 3.
+
+### What step 9 of setup.cmd does
+
+One status line per part; the [Windows setup design](docs/WINDOWS-SETUP.md) has the details.
+
+1. **bot.env.** The first time, it creates `C:\all-in-db\bot.env` from `.env.example`, readable only by you, Administrators and SYSTEM. It asks for the production bot token (hidden) and the application ID. `DATABASE_URL` points to the `allin` database through `host.docker.internal`, and `DEV_GUILD_ID` stays empty, so the commands are registered globally. Setup never overwrites a value: to change one, edit the file and run `.\setup.cmd` again.
+2. **Bot image.** Builds `all-in-bot` from the checkout with `deploy/Dockerfile`, without build attestations (`BUILDX_NO_DEFAULT_ATTESTATIONS=1`, and `provenance: false` in `deploy/compose.yaml`): they hold timestamps, so without them an unchanged checkout keeps its image id and the bot keeps running.
+3. **Slash commands.** Registers them globally, but only when their definitions changed since the last registration (setup keeps a hash in `%LOCALAPPDATA%\all-in\state.json`).
+4. **Bot container.** Starts the bot, or restarts it on the new image, and waits until it's logged in to Discord (at most 3 minutes). The container migrates `allin` before the bot starts, after the old container has stopped, so the old bot never runs on a newer schema. Step 7 leaves `allin` alone for that reason.
+
+Step 9 needs only the roles and databases of step 5: a failed migration of `allin_dev` or `allin_test` doesn't hold back the bot. A failed build or registration leaves the running bot alone. With `-NonInteractive` it never asks; when `bot.env` misses a value, it says which one to fill in. `.\setup.cmd -CheckOnly` reports whether `bot.env` is complete and the bot is online, without changing anything.
+
+`npm run db:restore` of `allin` stops the bot during the restore and starts it again afterwards, also when the restore fails. On start, the bot refunds the rounds that were open in the dump.
+
+### Logs
+
+```powershell
+docker logs --tail 100 all-in-bot-1
+docker logs --follow all-in-bot-1
+```
+
+The log is JSON (pino), and Docker keeps at most 3 files of 10 MB. The bot starts with Docker Desktop. To stop it, run `docker stop all-in-bot-1`; it stays stopped until the next `.\setup.cmd`.
+
+### Without Docker: systemd
+
+`deploy/all-in.service` is an example unit for a Linux host with Node.js 26 and a reachable PostgreSQL 18: it runs the migrations, then the bot, as the user `allin`, and restarts it after a crash. Fill in `/etc/all-in/bot.env` like the `bot.env` above, with `DATABASE_URL` pointing to your database.
+
+```sh
+sudo useradd --system --home-dir /opt/all-in --shell /usr/sbin/nologin allin
+sudo git clone https://github.com/robdewilligen/all-in-bot.git /opt/all-in
+sudo chown -R allin:allin /opt/all-in
+cd /opt/all-in
+sudo -u allin npm ci
+sudo -u allin npm run build
+sudo install -d -m 750 -g allin /etc/all-in
+sudo install -m 640 -g allin .env.example /etc/all-in/bot.env
+sudoedit /etc/all-in/bot.env
+sudo -u allin node --env-file=/etc/all-in/bot.env dist/deploy-commands.js
+sudo cp deploy/all-in.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now all-in
+journalctl -u all-in --follow
+```
+
+To update: `git pull`, `npm ci` and `npm run build` as `allin`, the `deploy-commands.js` line again when the commands changed, then `sudo systemctl restart all-in`.

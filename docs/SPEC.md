@@ -296,6 +296,11 @@ Every phase ends with `npm run check`, a summary and a commit. Wait for approval
    - 4b. **Tables**: seats, betting phase, insurance, turns and their timers, the bet modal, stale-button handling and startup refunds. Then the table threads that roulette and blackjack share: a thread per table, `/create-table`, the lobby with its bet forms, and the table numbers.
 5. **Slot machine**: the machine, the exact RTP test and script, and the command with its reveal.
 6. **Hardening**: graceful shutdown (close the tables, destroy the client, end the pool), a logging review, README, deploy files and a final `npm run check`.
+7. **Deployment on the database host**: the production bot runs as a Docker container next to the database on the second PC. Updating it is `git pull` on `master` followed by one command, `setup.cmd`, whose step 9 does the rest:
+   - the first time, it writes `bot.env` in the data directory, asking for the production token with a hidden prompt;
+   - it builds the bot image and runs the migrations;
+   - it registers the slash commands, globally, only when their definitions changed;
+   - it restarts the bot container and ends once the bot is logged in to Discord.
 
 ## 14. Done by the human
 

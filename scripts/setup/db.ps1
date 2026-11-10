@@ -4,7 +4,8 @@
     Everyday commands for the All-in database on the database PC: status, logs, psql, backup and restore.
 .PARAMETER Action
     status: container, health, databases, newest dump and backup task. logs: the last 200 log lines.
-    psql: an interactive psql session as superuser. backup: run the nightly backup now. restore: restore a dump.
+    psql: an interactive psql session as superuser. backup: run the nightly backup now. restore: restore a dump;
+    for allin, a running bot is stopped during the restore and started again afterwards.
 .PARAMETER DataDir
     Data directory (.env, backup.ps1, backups). Default: the value init.ps1 saved, else C:\all-in-db.
 .PARAMETER Port
@@ -194,23 +195,17 @@ function Invoke-RestoreAction {
         }
         $dump = $dumps[$number - 1]
     }
+    $botId = Get-RunningBotContainerId -Database $Database
     Show-SetupMessage -Text ('This replaces everything in database {0} with {1}.' -f $Database, $dump.Name) -Color 'Yellow'
+    if ($botId) {
+        Show-SetupMessage -Text ('The bot ({0}) runs on this database: it is stopped during the restore and started again afterwards, also when the restore fails. On start it refunds the open rounds.' -f (Get-BotLayout).ContainerName) -Color 'Yellow'
+    }
     $confirmation = Read-Host -Prompt ('Type {0} to continue' -f $Database)
     if ($confirmation -cne $Database) {
         Show-SetupStatus -Status ACTION -Message 'Nothing restored: the name did not match.'
         return 2
     }
-    # One transaction: a restore that fails halfway leaves the database as it was.
-    $arguments = @('exec', $id, 'pg_restore', '-U', 'postgres', '--clean', '--if-exists', '--single-transaction', '-d', $Database)
-    if ($Database -ne 'allin') { $arguments += @('--no-owner', '--no-acl', "--role=$($target.Owner)") }
-    $arguments += "/backups/$($dump.Name)"
-    $run = Invoke-NativeCommand -FilePath 'docker' -ArgumentList $arguments
-    if ($run.ExitCode -ne 0) {
-        Show-SetupStatus -Status FAILED -Message "pg_restore reported errors (exit code $($run.ExitCode)); see the output above"
-        return 1
-    }
-    Show-SetupStatus -Status OK -Message ('Restored {0} into {1}.' -f $dump.Name, $Database)
-    0
+    Invoke-DatabaseRestore -ContainerId $id -Database $Database -Owner $target.Owner -DumpName $dump.Name -BotContainerId $botId
 }
 
 $layout = Get-DatabaseLayout
