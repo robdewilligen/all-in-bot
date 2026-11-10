@@ -401,6 +401,18 @@ Describe 'Locations' {
             Should -BeExactly 'C:\logs\install-20261109-170509.log'
     }
 
+    It 'points a failed part to its own log, which the setup transcript does not hold' {
+        Format-SetupFailureMessage -TranscriptPath 'C:\logs\setup-1.log' -LogDir 'C:\logs' -FailedPart init |
+            Should -BeExactly 'Setup stopped with an error in init.ps1; its FAILED lines are above. Details: the newest init-*.log in C:\logs'
+        Format-SetupFailureMessage -TranscriptPath 'C:\logs\setup-1.log' -LogDir 'C:\logs' -FailedPart install |
+            Should -BeExactly 'Setup stopped with an error in install.ps1; its FAILED lines are above. Details: the newest install-*.log in C:\logs'
+    }
+
+    It 'points an error of setup.ps1 itself to its transcript' {
+        Format-SetupFailureMessage -TranscriptPath 'C:\logs\setup-1.log' -LogDir 'C:\logs' |
+            Should -BeExactly 'Setup stopped with an error. Details: C:\logs\setup-1.log'
+    }
+
     It 'finds the repo root two levels above the module' {
         Join-Path (Get-RepoRoot) 'scripts\setup\AllIn.Setup.psm1' | Should -Exist
     }
