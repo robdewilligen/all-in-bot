@@ -1,0 +1,10 @@
+# The Dockerfile copies only what it needs; this keeps secrets and bulk out of the build context.
+.env
+.env.*
+.git
+.github
+.claude
+node_modules
+dist
+coverage
+**/*.log

@@ -1,0 +1,7 @@
+dist/
+coverage/
+drizzle/
+package-lock.json
+
+# Docs are formatted by hand; Prettier would realign every table.
+*.md

@@ -1,0 +1,59 @@
+{
+  "name": "all-in",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Discord casino bot with roulette, blackjack and slots, played with virtual coins that have no real-world value",
+  "type": "module",
+  "engines": {
+    "node": ">=26"
+  },
+  "scripts": {
+    "dev": "tsx watch --env-file-if-exists=.env src/index.ts",
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node --env-file-if-exists=.env dist/index.js",
+    "deploy:commands": "tsx --env-file-if-exists=.env src/deploy-commands.ts",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "tsx --env-file-if-exists=.env src/db/migrate.ts",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "test": "vitest run",
+    "check": "npm run typecheck && npm run lint && prettier --check . && npm run test",
+    "sim:blackjack": "tsx scripts/simulate-blackjack.ts",
+    "rtp:slots": "tsx scripts/slots-rtp.ts",
+    "setup": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/setup/setup.ps1",
+    "setup:install": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/setup/setup.ps1 -InstallOnly",
+    "setup:init": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/setup/init.ps1",
+    "setup:check": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/setup/setup.ps1 -CheckOnly",
+    "check:setup": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"$ErrorActionPreference = 'Stop'; & ./scripts/setup/tests/Invoke-SetupChecks.ps1; exit $LASTEXITCODE\"",
+    "db:status": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/setup/db.ps1 status",
+    "db:logs": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/setup/db.ps1 logs",
+    "db:psql": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/setup/db.ps1 psql",
+    "db:backup": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/setup/db.ps1 backup",
+    "db:restore": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/setup/db.ps1 restore"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@types/node": "26.6.6",
+    "@types/pg": "8.23.1",
+    "drizzle-kit": "0.31.11",
+    "eslint": "10.14.0",
+    "eslint-config-prettier": "10.1.8",
+    "prettier": "3.9.10",
+    "tsx": "4.23.15",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.72.1",
+    "vite": "8.3.7",
+    "vitest": "5.1.0"
+  },
+  "allowScripts": {
+    "esbuild": false
+  },
+  "dependencies": {
+    "discord.js": "14.28.1",
+    "drizzle-orm": "0.45.4",
+    "pg": "8.23.1",
+    "pino": "10.4.0",
+    "zod": "4.6.7"
+  }
+}

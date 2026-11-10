@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+    branches: [master]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: allin_test
+          POSTGRES_PASSWORD: allin_test
+          POSTGRES_DB: allin_test
+        ports:
+          - 5432:5432
+        # Over TCP, so initdb's temporary server doesn't count as healthy.
+        options: >-
+          --health-cmd "pg_isready -h 127.0.0.1 -U allin_test -d allin_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+
+    env:
+      # Throwaway CI container, not a secret.
+      TEST_DATABASE_URL: postgresql://allin_test:allin_test@localhost:5432/allin_test
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - run: npm ci
+
+      # The database tests migrate as well; this step checks the script the setup runs.
+      - run: npm run db:migrate
+        env:
+          DATABASE_URL: ${{ env.TEST_DATABASE_URL }}
+
+      - run: npm run check
+
+  # The image the database PC builds in setup step 9: it must build and start without secrets.
+  docker-image:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - run: docker build --file deploy/Dockerfile --tag all-in-bot .
+
+      - name: Commands load inside the image
+        run: docker run --rm all-in-bot node dist/deploy-commands.js --print
+
+      - name: Node in the image has Temporal
+        run: docker run --rm all-in-bot node -e "if (typeof Temporal !== 'object') process.exit(1)"
+
+  setup-scripts:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      # Windows PowerShell 5.1, the version every target PC has.
+      - name: PSScriptAnalyzer and Pester
+        shell: powershell
+        run: .\scripts\setup\tests\Invoke-SetupChecks.ps1 -InstallMissing

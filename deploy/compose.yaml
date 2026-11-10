@@ -1,0 +1,39 @@
+name: all-in
+
+services:
+  bot:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      # Attestations carry build timestamps, so without them an unchanged build keeps its image id.
+      provenance: false
+      sbom: false
+    # scripts/setup/init.ps1 compares this image's id before and after a build.
+    image: all-in-bot
+    init: true
+    restart: unless-stopped
+    # Kept in the data directory, so a re-clone of the repo keeps the production token.
+    env_file: ${ALLIN_BOT_ENV_FILE:?run scripts/setup/init.ps1, it passes the bot.env of the data directory}
+    environment:
+      READY_FILE: /run/all-in/ready
+    # A fresh tmpfs on every start, so a ready file never outlives the process that wrote it.
+    tmpfs:
+      - /run/all-in
+    # Docker Desktop knows host.docker.internal already; a Linux engine needs this mapping.
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
+    # Room for the graceful shutdown: close the tables, destroy the client, end the pool.
+    stop_grace_period: 30s
+    # client-ready.ts writes the file after login, so `up --wait` returns once the bot is online.
+    healthcheck:
+      test: ['CMD-SHELL', 'test -f "$$READY_FILE"']
+      start_period: 60s
+      start_interval: 2s
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '3'

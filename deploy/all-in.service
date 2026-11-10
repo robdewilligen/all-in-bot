@@ -1,0 +1,31 @@
+# Example systemd unit for a Linux host without Docker; README.md "Deployment" has the steps.
+# Assumes the repo in /opt/all-in (built with npm ci and npm run build), owned by the user allin,
+# and the bot's variables in /etc/all-in/bot.env (owner root, group allin, mode 640).
+# Adjust /usr/bin/node when `command -v node` says otherwise.
+
+[Unit]
+Description=All-in Discord bot
+Wants=network-online.target
+After=network-online.target postgresql.service
+StartLimitIntervalSec=10min
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=allin
+Group=allin
+WorkingDirectory=/opt/all-in
+EnvironmentFile=/etc/all-in/bot.env
+Environment=NODE_ENV=production
+ExecStartPre=/usr/bin/node dist/db/migrate.js
+ExecStart=/usr/bin/node dist/index.js
+Restart=on-failure
+RestartSec=10s
+TimeoutStopSec=30s
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target
