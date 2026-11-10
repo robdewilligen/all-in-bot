@@ -35,7 +35,14 @@ const createdAt = () => timestamp('created_at', { withTimezone: true }).notNull(
 
 export const game = pgEnum('game', ['roulette', 'blackjack', 'slots']);
 export const roundStatus = pgEnum('round_status', ['open', 'settled', 'refunded']);
-export const ledgerKind = pgEnum('ledger_kind', ['daily', 'stake', 'raise', 'payout', 'refund']);
+export const ledgerKind = pgEnum('ledger_kind', [
+  'daily',
+  'stake',
+  'raise',
+  'payout',
+  'refund',
+  'first_gift',
+]);
 
 export const players = pgTable(
   'players',
@@ -154,12 +161,32 @@ export const ledgerEntries = pgTable(
       'ledger_entries_amount_sign',
       sql`${table.amount} <> 0 AND (${table.kind} IN ('stake', 'raise')) = (${table.amount} < 0)`,
     ),
+    // Compared as text: PostgreSQL refuses an enum value in the transaction that added it.
     check(
-      'ledger_entries_round_unless_daily',
-      sql`(${table.kind} = 'daily') = (${table.roundId} IS NULL)`,
+      'ledger_entries_round_unless_gift',
+      sql`(${table.kind}::text IN ('daily', 'first_gift')) = (${table.roundId} IS NULL)`,
     ),
     check('ledger_entries_balance_after_not_negative', sql`${table.balanceAfter} >= 0`),
     index('ledger_entries_player_idx').on(table.guildId, table.userId, table.createdAt),
+  ],
+);
+
+/** The one-time head start per player per server (SPEC §5); the key makes a claim idempotent. */
+export const firstGifts = pgTable(
+  'first_gifts',
+  {
+    guildId: text('guild_id').notNull(),
+    userId: text('user_id').notNull(),
+    amount: coins('amount').notNull(),
+    claimedAt: timestamp('claimed_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.guildId, table.userId] }),
+    foreignKey({
+      columns: [table.guildId, table.userId],
+      foreignColumns: [players.guildId, players.userId],
+    }),
+    check('first_gifts_amount_positive', sql`${table.amount} > 0`),
   ],
 );
 

@@ -24,6 +24,7 @@ The README states this plainly for server owners. Don't add features that break 
 
 | Command | Options | What it does |
 | --- | --- | --- |
+| `/first-gift` | none | Claim a one-time head start of 1,000 coins in this server |
 | `/dailygift` | none | Claim today's coins |
 | `/balance` | `player` (user, optional) | Balance and leaderboard position |
 | `/leaderboard` | `page` (integer ≥ 1, optional) | Players with the most coins in this server |
@@ -92,11 +93,17 @@ The README states this plainly for server owners. Don't add features that break 
 
 ## 5. Economy
 
-New players start with 0 coins; the daily gift is the only source of new coins. A player's row is created on their first command in a server, and every command they use refreshes their stored display name: the member's display name (server nickname, otherwise global name, otherwise username).
+New players start with 0 coins; the first gift and the daily gift are the only sources of new coins. A player's row is created on their first command in a server, and every command they use refreshes their stored display name: the member's display name (server nickname, otherwise global name, otherwise username).
+
+### /first-gift
+
+- 1,000 coins, once per player per server, as a head start. Every player can claim it once, also players who already have coins.
+- A second claim gets an ephemeral reply that it was already claimed; nothing changes.
+- Reply: public, with the amount and the new balance.
 
 ### /dailygift
 
-- 1,000 coins per calendar day, plus 100 for every consecutive day, up to +700 (from day 8 on: 1,700 a day). Missing a day resets the streak.
+- 100 coins per calendar day, plus 10 for every consecutive day, up to +70 (from day 8 on: 170 a day). Missing a day resets the streak.
 - The day ends at midnight in `DAILY_RESET_TIMEZONE` (default `Europe/Amsterdam`). Daylight saving changes must work; test the March and October switches.
 - A second claim on the same day gets an ephemeral reply with the next reset as a relative timestamp.
 - Reply: amount, streak, new balance and the next reset.
@@ -220,7 +227,7 @@ A blackjack game has 4 seats and plays round after round for as long as players 
 
 ## 9. /help
 
-Ephemeral. Without a topic it gives an overview of all commands, `/create-table` included, and says that every table is a thread. Topics: economy (daily gift, streaks, limits, amount syntax), roulette (the notation table, announced bets and how a betting round works), blackjack (rules, seats and buttons) and slots (paytable and payout percentage).
+Ephemeral. Without a topic it gives an overview of all commands, `/create-table` included, and says that every table is a thread. Topics: economy (first gift, daily gift, streaks, limits, amount syntax), roulette (the notation table, announced bets and how a betting round works), blackjack (rules, seats and buttons) and slots (paytable and payout percentage).
 
 ## 10. Data model and wallet
 
@@ -232,13 +239,14 @@ Discord IDs are stored as `text`. Coin columns are `bigint`; the code reads them
 | `daily_claims` | guild_id, user_id, claim_date (date), amount, streak, claimed_at | PK (guild_id, user_id, claim_date) |
 | `table_rounds` | id, guild_id, game, status (open, settled, refunded), outcome (jsonb), created_at, settled_at | partial index where status = 'open' |
 | `rounds` | id, guild_id, user_id, game, table_round_id, status (open, settled, refunded), stake, payout, details (jsonb), created_at, settled_at | `stake > 0`; FK on table_round_id (null for slots); unique (guild_id, user_id, game) where status = 'open' |
-| `ledger_entries` | id, guild_id, user_id, round_id, kind (daily, stake, raise, payout, refund), amount (signed), balance_after, created_at | FK on round_id; index on (guild_id, user_id, created_at); append-only, enforced by a trigger that rejects UPDATE and DELETE |
+| `first_gifts` | guild_id, user_id, amount, claimed_at | PK (guild_id, user_id), so a player gets it once per server |
+| `ledger_entries` | id, guild_id, user_id, round_id, kind (daily, first_gift, stake, raise, payout, refund), amount (signed), balance_after, created_at | FK on round_id, which is null exactly for the two gifts; index on (guild_id, user_id, created_at); append-only, enforced by a trigger that rejects UPDATE and DELETE |
 | `guild_table_counters` | guild_id, last_number | PK guild_id; the table numbers of §4, taken with one atomic upsert, so two tables never get the same number. Not money, so not part of the wallet |
 
 Wallet API (names may change, the guarantees may not):
 
 - `balanceOf`, `rankOf` and `leaderboard(guildId, page)`
-- `claimDaily(player, now)`
+- `claimDaily(player, now)` and `claimFirstGift(player)`: each idempotent through its key
 - `playInstant(player, game, stake, play)`: debit, play and credit in one transaction (slots)
 - `openTableRound`, then `openRound` and `raiseRound` for each player at the table, then `settleTableRound`, which settles the table round and all of its players' rounds in one transaction. Rows are locked through `SELECT … FOR UPDATE`.
 - `refundTableRound(id)`: refunds one open table round and its players' rounds, for a game whose settlement failed, so its players can play that game again without a restart. A table round that is no longer open fails with an error that says whether it was settled or refunded, so a game whose settlement answer got lost can tell the players the truth. The bot retries a refund that fails until it goes through (§4).
@@ -247,7 +255,7 @@ Wallet API (names may change, the guarantees may not):
 Tests, against `TEST_DATABASE_URL`:
 
 - 50 parallel stakes of 100 on a balance of 1,000: exactly 10 succeed, and the balance ends at 0 without ever going negative.
-- Concurrent daily claims for the same player and day: exactly one succeeds.
+- Concurrent daily claims for the same player and day: exactly one succeeds. The same for concurrent first-gift claims.
 - For every player, the sum of the ledger amounts equals the balance.
 - A game that throws rolls back completely.
 - Settling a table round with 4 players is atomic: an error rolls back every player.

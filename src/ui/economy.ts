@@ -5,7 +5,7 @@ import {
   userMention,
   type InteractionReplyOptions,
 } from 'discord.js';
-import type { DailyClaim, LeaderboardPage, Standing } from '../core/wallet.js';
+import type { DailyClaim, FirstGiftClaim, LeaderboardPage, Standing } from '../core/wallet.js';
 import { discordTimestamp, formatCoins, formatCount, formatRank } from '../i18n/format.js';
 import { t } from '../i18n/index.js';
 import { colors } from './colors.js';
@@ -40,6 +40,28 @@ export function dailyGiftReply(
       { name: t(locale, 'daily.balance'), value: formatCoins(claim.balance), inline: true },
       { name: t(locale, 'daily.nextGift'), value: nextReset, inline: true },
     );
+  return { embeds: [embed] };
+}
+
+/** Public when claimed, like the daily gift; a second try is the player's own business. */
+export function firstGiftReply(
+  locale: string,
+  userId: string,
+  claim: FirstGiftClaim,
+): InteractionReplyOptions {
+  if (claim.status === 'alreadyClaimed') {
+    return { content: t(locale, 'firstGift.alreadyClaimed'), flags: MessageFlags.Ephemeral };
+  }
+  const embed = new EmbedBuilder()
+    .setColor(colors.dailyGift)
+    .setTitle(t(locale, 'firstGift.title'))
+    .setDescription(
+      t(locale, 'firstGift.claimed', {
+        player: userMention(userId),
+        amount: formatCoins(claim.amount),
+      }),
+    )
+    .addFields({ name: t(locale, 'firstGift.balance'), value: formatCoins(claim.balance) });
   return { embeds: [embed] };
 }
 

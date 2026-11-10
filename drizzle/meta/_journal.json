@@ -22,6 +22,13 @@
       "when": 1794337812360,
       "tag": "0002_table_counters",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1794345592580,
+      "tag": "0003_first_gift",
+      "breakpoints": true
     }
   ]
 }

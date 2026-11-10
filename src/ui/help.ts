@@ -9,6 +9,7 @@ import { slotsHelpEmbed } from './slots.js';
 
 /** The commands the overview lists, each with the key of its description. */
 const commands = [
+  ['first-gift', 'commands.firstgift.description'],
   ['dailygift', 'commands.dailygift.description'],
   ['balance', 'commands.balance.description'],
   ['leaderboard', 'commands.leaderboard.description'],
@@ -64,6 +65,12 @@ function economyEmbed(locale: string): EmbedBuilder {
     .setTitle(t(locale, 'help.economy.title'))
     .setDescription(t(locale, 'help.economy.description'))
     .addFields(
+      {
+        name: t(locale, 'help.economy.firstGift'),
+        value: t(locale, 'help.economy.firstGiftText', {
+          amount: formatCoins(gameConfig.firstGift.amount),
+        }),
+      },
       {
         name: t(locale, 'help.economy.dailyGift'),
         value: t(locale, 'help.economy.dailyGiftText', { base: formatCoins(daily.base) }),

@@ -44,7 +44,7 @@ export function openTestDatabase(): TestDatabase {
 
 export async function truncateAll(db: Database): Promise<void> {
   await db.execute(
-    sql`TRUNCATE ledger_entries, rounds, table_rounds, daily_claims, players, guild_table_counters RESTART IDENTITY`,
+    sql`TRUNCATE ledger_entries, rounds, table_rounds, daily_claims, first_gifts, players, guild_table_counters RESTART IDENTITY`,
   );
 }
 

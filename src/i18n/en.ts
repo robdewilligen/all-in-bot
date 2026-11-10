@@ -22,6 +22,7 @@ export const en = {
   },
   commands: {
     dailygift: { description: "Claim today's coins" },
+    firstgift: { description: 'Claim a one-time head start of coins in this server' },
     balance: {
       description: 'Balance and leaderboard position',
       player: 'The player to look up (default: you)',
@@ -44,6 +45,13 @@ export const en = {
     balance: 'Balance',
     nextGift: 'Next gift',
     alreadyClaimed: "You've already claimed today's gift. Your next gift is ready {time}.",
+  },
+  firstGift: {
+    title: '🎁 First gift',
+    claimed: '{player} got a head start of **{amount}**.',
+    balance: 'Balance',
+    alreadyClaimed:
+      'You already got your first gift in this server. `/dailygift` gives you more every day.',
   },
   balance: {
     title: '💰 Balance',
@@ -73,7 +81,10 @@ export const en = {
     economy: {
       title: '🪙 Economy',
       description:
-        'Each server has its own balances, streaks and leaderboard. The daily gift is the only way to get new coins.',
+        'Each server has its own balances, streaks and leaderboard. The first gift and the daily gift are the only ways to get new coins.',
+      firstGift: 'First gift',
+      firstGiftText:
+        '`/first-gift` gives you **{amount}** once in each server, as a head start. Everyone can claim it once, also players who already have coins.',
       dailyGift: 'Daily gift',
       dailyGiftText:
         "`/dailygift` gives you **{base}** once a day, plus your streak bonus. A new day starts at midnight in the bot's time zone, and `/dailygift` tells you when your next gift is ready.",

@@ -88,13 +88,13 @@ describe('players', () => {
 });
 
 describe('the daily gift', () => {
-  it('gives 1,000 coins on the first claim, with the next reset at midnight in Amsterdam', async () => {
+  it('gives 100 coins on the first claim, with the next reset at midnight in Amsterdam', async () => {
     const claim = await wallet.claimDaily(player(1), NOW);
     expect(claim).toEqual({
       status: 'claimed',
-      amount: 1_000,
+      amount: 100,
       streak: 1,
-      balance: 1_000,
+      balance: 100,
       nextReset: Temporal.Instant.from('2026-11-09T23:00:00Z'),
     });
   });
@@ -106,20 +106,20 @@ describe('the daily gift', () => {
       status: 'alreadyClaimed',
       nextReset: Temporal.Instant.from('2026-11-09T23:00:00Z'),
     });
-    expect(await wallet.balanceOf(player(1))).toBe(1_000);
+    expect(await wallet.balanceOf(player(1))).toBe(100);
   });
 
-  it('adds 100 per consecutive day up to 1,700 and resets after a missed day', async () => {
+  it('adds 10 per consecutive day up to 170 and resets after a missed day', async () => {
     const amounts: number[] = [];
     for (let day = 0; day < 9; day += 1) {
       const claim = await wallet.claimDaily(player(1), later(day));
       if (claim.status !== 'claimed') throw new Error(`day ${String(day)} was not claimed`);
       amounts.push(claim.amount);
     }
-    expect(amounts).toEqual([1_000, 1_100, 1_200, 1_300, 1_400, 1_500, 1_600, 1_700, 1_700]);
+    expect(amounts).toEqual([100, 110, 120, 130, 140, 150, 160, 170, 170]);
     const afterGap = await wallet.claimDaily(player(1), later(10));
-    expect(afterGap).toMatchObject({ status: 'claimed', amount: 1_000, streak: 1 });
-    expect(await wallet.balanceOf(player(1))).toBe(13_500);
+    expect(afterGap).toMatchObject({ status: 'claimed', amount: 100, streak: 1 });
+    expect(await wallet.balanceOf(player(1))).toBe(1_350);
   });
 
   it('starts a new day at midnight in Amsterdam, not in UTC', async () => {
@@ -137,8 +137,86 @@ describe('the daily gift', () => {
       Array.from({ length: 10 }, () => wallet.claimDaily(player(1), NOW)),
     );
     expect(claims.filter((claim) => claim.status === 'claimed')).toHaveLength(1);
+    expect(await wallet.balanceOf(player(1))).toBe(100);
+    expect(await ledgerCount()).toBe(1);
+  });
+});
+
+describe('the first gift', () => {
+  it('gives 1,000 once per server, also to a player who already has coins', async () => {
+    await seed(db, player(1), 500);
+
+    expect(await wallet.claimFirstGift(player(1))).toEqual({
+      status: 'claimed',
+      amount: 1_000,
+      balance: 1_500,
+    });
+    expect(await wallet.claimFirstGift(player(1))).toEqual({ status: 'alreadyClaimed' });
+    expect(await wallet.balanceOf(player(1))).toBe(1_500);
+    expect(await wallet.claimFirstGift(player(1, OTHER_GUILD))).toEqual({
+      status: 'claimed',
+      amount: 1_000,
+      balance: 1_000,
+    });
+
+    const entries = await db
+      .select({
+        kind: ledgerEntries.kind,
+        roundId: ledgerEntries.roundId,
+        amount: ledgerEntries.amount,
+      })
+      .from(ledgerEntries)
+      .where(eq(ledgerEntries.kind, 'first_gift'));
+    expect(entries).toEqual([
+      { kind: 'first_gift', roundId: null, amount: 1_000 },
+      { kind: 'first_gift', roundId: null, amount: 1_000 },
+    ]);
+    expect(await ledgerMismatches(db)).toEqual([]);
+  });
+
+  it('lets exactly one of many concurrent claims through', async () => {
+    await seed(db, player(1), 0);
+    // A share lock on the player holds every claim at its first write until all have got there.
+    const holder = await pool.connect();
+    let claims: PromiseSettledResult<unknown>[];
+    try {
+      await holder.query('BEGIN');
+      await holder.query('SELECT 1 FROM players WHERE guild_id = $1 AND user_id = $2 FOR SHARE', [
+        GUILD,
+        player(1).userId,
+      ]);
+      const pending = Promise.allSettled(
+        Array.from({ length: 5 }, () => wallet.claimFirstGift(player(1))),
+      );
+      await waitForSessionsWaitingOnLocks(5);
+      await holder.query('COMMIT');
+      claims = await pending;
+    } finally {
+      holder.release();
+    }
+
+    expect(claims.map((claim) => claim.status)).toEqual(
+      Array.from({ length: 5 }, () => 'fulfilled'),
+    );
+    const values = claims.map((claim) => (claim.status === 'fulfilled' ? claim.value : null));
+    expect(
+      values.filter((value) => (value as { status: string }).status === 'claimed'),
+    ).toHaveLength(1);
     expect(await wallet.balanceOf(player(1))).toBe(1_000);
     expect(await ledgerCount()).toBe(1);
+  });
+
+  it('keeps the ledger rule that only gifts come without a round', async () => {
+    await wallet.claimFirstGift(player(1));
+    const rejected = db.insert(ledgerEntries).values({
+      guildId: GUILD,
+      userId: player(1).userId,
+      roundId: null,
+      kind: 'stake',
+      amount: -10,
+      balanceAfter: 990,
+    });
+    expect(await rejectionText(rejected)).toMatch(/ledger_entries_round_unless_gift/);
   });
 });
 
@@ -443,6 +521,8 @@ describe('the ledger', () => {
   it('adds up to every balance after a mix of games, gifts, raises and refunds', async () => {
     await wallet.claimDaily(player(1), NOW);
     await wallet.claimDaily(player(2), NOW);
+    await wallet.claimFirstGift(player(1));
+    await wallet.claimFirstGift(player(2));
     await wallet.playInstant(player(1), 'slots', 300, () => ({ payout: 900, details: null }));
     const table = await wallet.openTableRound(GUILD, 'blackjack');
     const { roundId } = await wallet.openRound(player(2), table, 200);
@@ -450,7 +530,8 @@ describe('the ledger', () => {
     await wallet.openRound(player(1), table, 100);
     await wallet.refundOpenRounds();
     await wallet.claimDaily(player(1), later(1));
-    expect(await balances()).toEqual({ [player(1).userId]: 2_700, [player(2).userId]: 1_000 });
+    // Alice: 100 + 1,000 + 600 from slots + 110 on day 2; Bob: 100 + 1,000, his stakes refunded.
+    expect(await balances()).toEqual({ [player(1).userId]: 1_810, [player(2).userId]: 1_100 });
     expect(await ledgerMismatches(db)).toEqual([]);
   });
 });

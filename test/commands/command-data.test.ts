@@ -8,6 +8,7 @@ import { describe, expect, it } from 'vitest';
 import type { Command } from '../../src/bot/types.js';
 import balance from '../../src/commands/economy/balance.js';
 import dailygift from '../../src/commands/economy/dailygift.js';
+import firstGift from '../../src/commands/economy/first-gift.js';
 import leaderboard from '../../src/commands/economy/leaderboard.js';
 import blackjack from '../../src/commands/games/blackjack.js';
 import createTable from '../../src/commands/games/create-table.js';
@@ -17,6 +18,7 @@ import help from '../../src/commands/general/help.js';
 
 const commands: Readonly<Record<string, Command>> = {
   dailygift,
+  'first-gift': firstGift,
   balance,
   leaderboard,
   roulette,
@@ -59,8 +61,11 @@ describe.each(Object.entries(commands))('/%s data', (name, command) => {
 });
 
 describe('command options (SPEC §3)', () => {
-  it('/dailygift has none', () => {
-    expect(dailygift.data.toJSON().options).toEqual([]);
+  it.each([
+    ['dailygift', dailygift],
+    ['first-gift', firstGift],
+  ] as const)('/%s has none', (_name, command) => {
+    expect(command.data.toJSON().options).toEqual([]);
   });
 
   it('/balance has an optional user option "player"', () => {
@@ -138,7 +143,8 @@ describe('cooldowns (SPEC §4)', () => {
 
   it('gives /leaderboard 5 seconds and leaves the others on the default', () => {
     expect(leaderboard.cooldown).toBe(5);
-    expect([dailygift, balance, help].map((command) => 'cooldown' in command)).toEqual([
+    expect([dailygift, firstGift, balance, help].map((command) => 'cooldown' in command)).toEqual([
+      false,
       false,
       false,
       false,
