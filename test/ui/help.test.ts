@@ -9,6 +9,7 @@ vi.mock('../../src/config/game.js', async (importOriginal) => {
       ...real.gameConfig,
       stakes: { min: 25, max: 50_000 },
       daily: { base: 2_000, streakBonus: 250, maxStreakBonus: 1_000 },
+      firstGift: { amount: 4_321 },
     },
   };
 });
@@ -17,6 +18,7 @@ describe('economy help', () => {
   it('takes every amount, day and limit from the game config', () => {
     const text = textOf(helpReply('en', 'economy'));
 
+    expect(text).toMatch(/`\/first-gift` gives you \*\*🪙 4,321\*\* once in each server/);
     expect(text).toMatch(/gives you \*\*🪙 2,000\*\* once a day/);
     expect(text).toMatch(/adds \*\*🪙 250\*\* to your gift, up to \*\*🪙 1,000\*\* extra/);
     expect(text).toMatch(/from day 5 on you get \*\*🪙 3,000\*\* a day/);

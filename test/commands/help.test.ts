@@ -17,6 +17,7 @@ async function helpFor(topic?: string): Promise<{ options: unknown; methods: str
 }
 
 function expectOverview(text: string): void {
+  expect(text).toMatch(/^`\/first-gift` · Claim a one-time head start of coins in this server$/m);
   expect(text).toMatch(/^`\/dailygift` · Claim today's coins$/m);
   expect(text).toMatch(/^`\/balance` · Balance and leaderboard position$/m);
   expect(text).toMatch(/^`\/leaderboard` · Players with the most coins in this server$/m);
@@ -50,10 +51,11 @@ describe('/help', () => {
     expect(isEphemeral(options)).toBe(true);
     expect(embedsOf(options).map((embed) => embed.color)).toEqual([Colors.Blurple]);
     const text = textOf(options);
-    expect(text).toMatch(/gives you \*\*🪙 1,000\*\* once a day/);
+    expect(text).toMatch(/`\/first-gift` gives you \*\*🪙 1,000\*\* once in each server/);
+    expect(text).toMatch(/gives you \*\*🪙 100\*\* once a day/);
     expect(text).toMatch(/starts at midnight/);
-    expect(text).toMatch(/adds \*\*🪙 100\*\* to your gift, up to \*\*🪙 700\*\* extra/);
-    expect(text).toMatch(/from day 8 on you get \*\*🪙 1,700\*\* a day/);
+    expect(text).toMatch(/adds \*\*🪙 10\*\* to your gift, up to \*\*🪙 70\*\* extra/);
+    expect(text).toMatch(/from day 8 on you get \*\*🪙 170\*\* a day/);
     expect(text).toMatch(/Miss a day and your streak starts over/);
     expect(text).toMatch(/at least \*\*🪙 10\*\* and at most \*\*🪙 1,000,000\*\* per round/);
     expect(text).toMatch(/`1\.5k`, `1,5k`, `2k`, `1m`/);

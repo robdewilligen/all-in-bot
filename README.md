@@ -46,7 +46,8 @@ Tests: `npm test` needs `TEST_DATABASE_URL`. `npm test -- --project unit` runs e
 
 | Command | What it does |
 | --- | --- |
-| `/dailygift` | Claim today's coins |
+| `/first-gift` | Claim a one-time head start of 1,000 coins in this server |
+| `/dailygift` | Claim today's coins: 100, plus 10 for each day in a row (up to 170) |
 | `/balance` | Balance and leaderboard position |
 | `/leaderboard` | Players with the most coins in this server |
 | `/roulette` | Place bets on the next spin of a shared roulette table |

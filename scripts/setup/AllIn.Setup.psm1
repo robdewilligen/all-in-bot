@@ -52,6 +52,20 @@ function Get-SetupLogPath {
     Join-Path $LogDir ('{0}-{1}.log' -f $Name, $Now.ToString('yyyyMMdd-HHmmss'))
 }
 
+# The transcript of setup.ps1 does not hold what install.ps1 and init.ps1 print: they run as child
+# processes and keep their own logs, so a failure there points to that log.
+function Format-SetupFailureMessage {
+    param(
+        [Parameter(Mandatory)][string]$TranscriptPath,
+        [Parameter(Mandatory)][string]$LogDir,
+        [ValidateSet('setup', 'install', 'init')][string]$FailedPart = 'setup'
+    )
+    if ($FailedPart -eq 'setup') {
+        return 'Setup stopped with an error. Details: {0}' -f $TranscriptPath
+    }
+    'Setup stopped with an error in {0}.ps1; its FAILED lines are above. Details: the newest {0}-*.log in {1}' -f $FailedPart, $LogDir
+}
+
 function Get-DatabaseLayout {
     [pscustomobject]@{
         DefaultDataDir = 'C:\all-in-db'

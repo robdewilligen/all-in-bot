@@ -47,6 +47,7 @@ if ($Dev) { $scriptArguments = @('-Dev') + $scriptArguments }
 
 $exitCode = Get-SetupExitCode -Name Error
 $restartNow = $false
+$installRan = $false
 $initRan = $false
 $transcriptPath = Get-SetupLogPath -LogDir $location.LogDir -Name 'setup'
 Start-Transcript -Path $transcriptPath | Out-Null
@@ -62,6 +63,7 @@ try {
         Show-SetupMessage ''
         Show-SetupMessage '=== Part 1: software and Windows settings (install.ps1) ===' -Color 'Cyan'
         & powershell.exe @powershellArguments $installScript -CheckOnly -NonInteractive -ResultPath $checkResultPath -LogDir $location.LogDir @scriptArguments
+        $installRan = $true
         $check = Import-SetupResult -Path $checkResultPath
         if ($null -eq $check) { throw "install.ps1 -CheckOnly stopped without a result (exit code $LASTEXITCODE)." }
         $installOutcome = $check
@@ -189,7 +191,12 @@ try {
             elseif ($restartNow) { Show-SetupStatus -Status ACTION -Message 'Restarting now.' }
             else { Show-SetupStatus -Status ACTION -Message 'Restart Windows to continue.' }
         }
-        default { Show-SetupStatus -Status FAILED -Message ('Setup stopped with an error. Details: {0}' -f $transcriptPath) }
+        default {
+            $failedPart = 'setup'
+            if ($initRan) { $failedPart = 'init' }
+            elseif ($installRan) { $failedPart = 'install' }
+            Show-SetupStatus -Status FAILED -Message (Format-SetupFailureMessage -TranscriptPath $transcriptPath -LogDir $location.LogDir -FailedPart $failedPart)
+        }
     }
     Show-SetupMessage ('Logs: {0}' -f $location.LogDir)
 }

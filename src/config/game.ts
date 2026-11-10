@@ -1,7 +1,9 @@
 /** Game and economy settings (SPEC §11). Engines receive these as arguments, never by import. */
 export const gameConfig = {
   stakes: { min: 10, max: 1_000_000 },
-  daily: { base: 1_000, streakBonus: 100, maxStreakBonus: 700 },
+  daily: { base: 100, streakBonus: 10, maxStreakBonus: 70 },
+  /** Once per player per server: a head start next to the daily gift (SPEC §5). */
+  firstGift: { amount: 1_000 },
   cooldowns: { defaultSeconds: 3, leaderboardSeconds: 5, createTableSeconds: 30 },
   leaderboard: { pageSize: 10 },
   /** Table threads (SPEC §4): a lobby without a new game closes; a bet form waits this long. */

@@ -26,6 +26,7 @@ export function fakeWallet(): FakeWallet {
     standingOf: unexpected('standingOf'),
     leaderboard: unexpected('leaderboard'),
     claimDaily: unexpected('claimDaily'),
+    claimFirstGift: unexpected('claimFirstGift'),
     playInstant: unexpected('playInstant'),
     openTableRound: unexpected('openTableRound'),
     openRound: unexpected('openRound'),

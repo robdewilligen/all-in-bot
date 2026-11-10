@@ -3,7 +3,14 @@ import type { NodePgQueryResultHKT } from 'drizzle-orm/node-postgres';
 import type { PgDatabase } from 'drizzle-orm/pg-core';
 import { gameConfig } from '../config/game.js';
 import type { Database } from '../db/client.js';
-import { dailyClaims, ledgerEntries, players, rounds, tableRounds } from '../db/schema.js';
+import {
+  dailyClaims,
+  firstGifts,
+  ledgerEntries,
+  players,
+  rounds,
+  tableRounds,
+} from '../db/schema.js';
 import { formatCoins } from '../i18n/format.js';
 import { PlayerError } from './errors.js';
 import { dayOf, nextResetAfter } from './time.js';
@@ -67,6 +74,10 @@ export type DailyClaim =
     }
   | { readonly status: 'alreadyClaimed'; readonly nextReset: Temporal.Instant };
 
+export type FirstGiftClaim =
+  | { readonly status: 'claimed'; readonly amount: number; readonly balance: number }
+  | { readonly status: 'alreadyClaimed' };
+
 export interface InstantPlay<Details> {
   readonly payout: number;
   readonly details: Details;
@@ -124,6 +135,8 @@ export interface Wallet {
   standingOf(player: PlayerRef): Promise<Standing>;
   leaderboard(guildId: string, page: number): Promise<LeaderboardPage>;
   claimDaily(player: PlayerIdentity, now: Temporal.Instant): Promise<DailyClaim>;
+  /** The one-time head start in this server; a second claim changes nothing. */
+  claimFirstGift(player: PlayerIdentity): Promise<FirstGiftClaim>;
   playInstant<Details>(
     player: PlayerIdentity,
     game: InstantGame,
@@ -339,6 +352,29 @@ export function createWallet(db: Database, options: WalletOptions): Wallet {
           balanceAfter: balance,
         });
         return { status: 'claimed', amount, streak, balance, nextReset };
+      });
+    },
+
+    claimFirstGift(player) {
+      const { amount } = gameConfig.firstGift;
+      return db.transaction(async (tx) => {
+        await upsertPlayer(tx, player);
+        // The primary key decides: a second claim inserts nothing and moves no coins.
+        const inserted = await tx
+          .insert(firstGifts)
+          .values({ guildId: player.guildId, userId: player.userId, amount })
+          .onConflictDoNothing()
+          .returning({ amount: firstGifts.amount });
+        if (inserted.length === 0) return { status: 'alreadyClaimed' };
+        const balance = await credit(tx, player, amount);
+        await tx.insert(ledgerEntries).values({
+          guildId: player.guildId,
+          userId: player.userId,
+          kind: 'first_gift',
+          amount,
+          balanceAfter: balance,
+        });
+        return { status: 'claimed', amount, balance };
       });
     },
 
