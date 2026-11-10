@@ -51,7 +51,8 @@ test/                  unit and integration tests
 scripts/               simulation and RTP scripts
   setup/               Windows setup: setup.ps1, install.ps1 (admin), init.ps1, db.ps1, AllIn.Setup.psm1, tests/ (Pester)
 drizzle/               generated SQL migrations (committed)
-deploy/database/       compose.yaml for PostgreSQL 18 on the database host
+deploy/                Dockerfile and compose.yaml for the production bot, all-in.service (systemd example)
+  database/            compose.yaml for PostgreSQL 18 on the database host
 setup.cmd              Windows setup entry point, starts scripts/setup/setup.ps1
 ```
 

@@ -1,8 +1,8 @@
 import { Client, GatewayIntentBits } from 'discord.js';
-import type pg from 'pg';
 import { Cooldowns } from './bot/cooldowns.js';
 import { loggableError } from './bot/errors.js';
 import { loadCommands, loadEvents } from './bot/loader.js';
+import { shutDown } from './bot/shutdown.js';
 import { TableRefunds } from './bot/tables/refunds.js';
 import { TableRegistry } from './bot/tables/registry.js';
 import { createTableHosts } from './bot/tables/table.js';
@@ -17,20 +17,6 @@ process.on('unhandledRejection', (reason) => {
   logger.error({ err: loggableError(reason) }, 'unhandled promise rejection');
 });
 
-async function stop(client: Client, pool: pg.Pool): Promise<void> {
-  try {
-    await client.destroy();
-  } catch (error) {
-    logger.error({ err: loggableError(error) }, 'closing the Discord client failed');
-  }
-  try {
-    await pool.end();
-  } catch (error) {
-    logger.error({ err: loggableError(error) }, 'closing the database pool failed');
-  }
-  process.exit(0);
-}
-
 async function start(): Promise<void> {
   const env = parseEnv(botEnvSchema);
   logger.level = env.LOG_LEVEL;
@@ -42,20 +28,23 @@ async function start(): Promise<void> {
     intents: [GatewayIntentBits.Guilds],
     allowedMentions: { parse: [] },
   });
-  const shutDown = (signal: NodeJS.Signals): void => {
+  const tables = new TableRegistry();
+  const refunds = new TableRefunds(wallet, logger);
+  // `once`: a second Ctrl+C gets Node's default and ends the process right away.
+  const onSignal = (signal: NodeJS.Signals): void => {
     logger.info({ signal }, 'shutting down');
-    void stop(client, pool);
+    void shutDown({ tables, refunds, client, pool, logger }).then(() => process.exit(0));
   };
-  process.once('SIGINT', shutDown);
-  process.once('SIGTERM', shutDown);
+  process.once('SIGINT', onSignal);
+  process.once('SIGTERM', onSignal);
 
   const context: AppContext = {
     wallet,
     logger,
     clock: () => Temporal.Now.instant(),
     cooldowns: new Cooldowns(),
-    tables: new TableRegistry(),
-    refunds: new TableRefunds(wallet, logger),
+    tables,
+    refunds,
     hosts: createTableHosts(createTableNumbers(db)),
   };
   client.commands = await loadCommands();

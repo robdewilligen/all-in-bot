@@ -145,11 +145,35 @@ Run on a real PC; send the logs from `%LOCALAPPDATA%\all-in\logs` when something
 
 ## Architecture
 
-_To be written._
+```
+src/
+  index.ts            startup: config → database → Discord client → loaders → refunds → login
+  config/             .env schema (zod) and the game settings
+  core/               wallet (every coin movement), amounts, daily reset, errors, logger
+  db/                 Drizzle schema, connection pool, migrations
+  games/              pure engines: roulette, blackjack, slots (no Discord, no database)
+  bot/                Discord glue: loaders, error replies, cooldowns, shutdown, tables
+  commands/<group>/   one slash command per file
+  events/             one client event per file
+  ui/                 embeds and buttons
+  i18n/               every text a player sees
+```
+
+- **Money.** Only `src/core/wallet.ts` changes balances. Every coin movement is one database transaction that also appends a ledger entry with the resulting balance. Debits are conditional (`… WHERE balance >= stake`), so two commands at once can't overspend, a CHECK constraint keeps balances at 0 or above, and a trigger keeps the ledger append-only.
+- **Shared tables.** A table is a thread (`src/bot/tables/table.ts`) that hosts one game at a time and shows a lobby between games; its number comes from `guild_table_counters`. A game (`roulette-table.ts`, `blackjack-table.ts`) is an ordinary message in that thread.
+  - The table registry (`src/bot/tables/registry.ts`) keeps tables and games in memory per server. It seats each player at one game per game type per server, only in channels the player can see, and runs seating one command at a time per server.
+  - Every table and game handles one action at a time.
+  - A player's stake is an open round in the database until the game's shared outcome settles everyone in one transaction. A failed refund is retried until it goes through (`refunds.ts`), and when the bot restarts, open rounds are refunded.
+- **Engines** receive their settings and a draw function (backed by `crypto.randomInt`) as arguments and return plain data, so tests use fixed draws and stacked decks.
+- **Texts** live in `src/i18n/en.ts` and are looked up with typed keys: a missing or misspelled key or placeholder is a compile error.
 
 ## Adding a game
 
-_To be written._
+1. Write the engine in `src/games/<game>/`: pure, settings and draw as arguments, tested with fixed draws.
+2. Put its settings in `src/config/game.ts`.
+3. Move coins only through the wallet: `playInstant` for a solo game such as slots, or a table round (`openTableRound`, `openRound` and `raiseRound`, then `settleTableRound`) for a shared table. A shared game is played at a table thread: export a `play<Game>` entry point the way `playRoulette` does, and add its button to the lobby.
+4. Add the command in `src/commands/games/` (one default export), its embeds in `src/ui/`, its texts in `src/i18n/en.ts` and a topic in `/help`.
+5. Run `npm run deploy:commands` to register it.
 
 ## Deployment
 

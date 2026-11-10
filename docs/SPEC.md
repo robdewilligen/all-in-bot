@@ -270,6 +270,7 @@ Infrastructure: one `pg.Pool` for the whole app, closed on shutdown, connecting 
 | `TEST_DATABASE_URL` | tests only | A separate database that tests may wipe |
 | `DAILY_RESET_TIMEZONE` | no | Default `Europe/Amsterdam` |
 | `LOG_LEVEL` | no | Default `info` |
+| `READY_FILE` | no | Set only by `deploy/compose.yaml`, not in `.env`: the bot writes this file once it's logged in, for the container's healthcheck |
 
 Game settings (limits, daily amounts, blackjack rules, table sizes and timers, the lobby timeout, reel weights, paytable) live in a typed config module, not in `.env`.
 
@@ -279,7 +280,7 @@ Game settings (limits, daily amounts, blackjack rules, table sizes and timers, t
 - tsconfig (strict, NodeNext, `verbatimModuleSyntax`), `eslint.config.js`, a Prettier config, `.gitignore` and `.env.example`.
 - README.md: what All-in is, the guardrails, setup and run instructions, the commands, the architecture and how to add a game. It also names the channel permissions tables need, and says that each database belongs to exactly one bot process: startup refunds would otherwise hit another instance's live tables.
 - `.github/workflows/ci.yml`: Node 26, a PostgreSQL 18 service container, `npm ci`, migrations on the test database, then `npm run check`.
-- `deploy/`: a Dockerfile (multi-stage, non-root user, Node 26 slim), a `compose.yaml` (bot plus `postgres:18`, with the data volume mounted at `/var/lib/postgresql`) and an example systemd unit `all-in.service`.
+- `deploy/`: a Dockerfile (multi-stage, non-root user, Node 26 slim), a `compose.yaml` for the bot and an example systemd unit `all-in.service`. PostgreSQL runs from `deploy/database/compose.yaml` (`postgres:18`, data volume mounted at `/var/lib/postgresql`), which the Windows setup manages.
 - No sharding; Discord only requires it from 2,500 servers. Keep all in-memory state (tables, shoes, cooldowns) keyed by server so it would stay correct per shard.
 
 ## 13. Phases
