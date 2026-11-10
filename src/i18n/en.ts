@@ -33,7 +33,7 @@ export const en = {
     help: {
       description: 'Rules, notation and payouts',
       topic: 'What to explain',
-      topics: { economy: 'Economy', roulette: 'Roulette', blackjack: 'Blackjack' },
+      topics: { economy: 'Economy', roulette: 'Roulette', blackjack: 'Blackjack', slots: 'Slots' },
     },
   },
   daily: {
@@ -68,6 +68,7 @@ export const en = {
       economy: '`/help topic:economy` · Daily gift, streaks, limits and amounts',
       roulette: '`/help topic:roulette` · Notation, announced bets and how a round works',
       blackjack: '`/help topic:blackjack` · Rules, seats, turns and payouts',
+      slots: '`/help topic:slots` · Paytable and payout percentage',
     },
     economy: {
       title: '🪙 Economy',
@@ -443,5 +444,43 @@ export const en = {
       hard: '{total}',
       soft: 'soft {total}',
     },
+  },
+  slots: {
+    balance: 'Balance',
+    bet: 'Bet',
+    command: {
+      bet: 'How much to bet: 250, 2,500, 1.5k, all, max or half',
+      description: 'Spin the slot machine',
+    },
+    help: {
+      anywhere: '{symbols} anywhere on the payline · **{multiplier}×**',
+      description:
+        '`/spin bet:<amount>` spins three reels, and the middle row is the payline. Payouts are multiples of your bet and include it.',
+      line: '{symbols} · **{multiplier}×**',
+      payout: 'Payout percentage',
+      payoutText:
+        'Over every possible spin, the machine pays back **{rtp}** of all bets, and **{winRate}** of spins win.',
+      paytable: 'Paytable',
+      title: '🎰 Slots',
+    },
+    jackpot: '🎉 **JACKPOT!** {count}× {symbol} pays {multiplier}×',
+    net: 'Net result',
+    netLoss: '-{amount}',
+    netWin: '+{amount}',
+    noWin: 'No win this time.',
+    payline: '{symbols} ⬅️',
+    spinning: 'Spinning…',
+    symbols: {
+      bell: '🔔',
+      cherry: '🍒',
+      diamond: '💎',
+      grape: '🍇',
+      lemon: '🍋',
+      orange: '🍊',
+      seven: '7️⃣',
+    },
+    title: '🎰 Slots',
+    win: '**{count}× {symbol} pays {multiplier}×**',
+    winnings: 'Winnings',
   },
 } as const;

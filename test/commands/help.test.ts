@@ -4,6 +4,7 @@ import help from '../../src/commands/general/help.js';
 import { t } from '../../src/i18n/index.js';
 import { blackjackHelpEmbed } from '../../src/ui/blackjack.js';
 import { rouletteHelpEmbed } from '../../src/ui/roulette.js';
+import { slotsHelpEmbed } from '../../src/ui/slots.js';
 import { embedsOf, fakeChatInput, isEphemeral, textOf } from '../helpers/discord.js';
 
 async function helpFor(topic?: string): Promise<{ options: unknown; methods: string[] }> {
@@ -23,10 +24,12 @@ function expectOverview(text: string): void {
   const lines = text.split('\n');
   expect(lines).toContain(`\`/roulette\` · ${t('en-US', 'roulette.command.description')}`);
   expect(lines).toContain(`\`/blackjack\` · ${t('en-US', 'blackjack.command.description')}`);
+  expect(lines).toContain(`\`/spin\` · ${t('en-US', 'slots.command.description')}`);
   expect(lines).toContain(`\`/create-table\` · ${t('en-US', 'tables.command.description')}`);
   expect(text).toMatch(/^`\/help topic:economy` · Daily gift, streaks, limits and amounts$/m);
   expect(text).toMatch(/^`\/help topic:roulette` · /m);
   expect(text).toMatch(/^`\/help topic:blackjack` · /m);
+  expect(text).toMatch(/^`\/help topic:slots` · /m);
   expect(text).toMatch(/each table is a thread/);
 }
 
@@ -66,12 +69,18 @@ describe('/help', () => {
     expectOverview(textOf(options));
   });
 
-  it('shows the roulette and blackjack topics ephemerally', async () => {
+  it('shows the roulette, blackjack and slots topics ephemerally', async () => {
     const roulette = await helpFor('roulette');
     const blackjack = await helpFor('blackjack');
+    const slots = await helpFor('slots');
 
-    expect([roulette, blackjack].map(({ options }) => isEphemeral(options))).toEqual([true, true]);
+    expect([roulette, blackjack, slots].map(({ options }) => isEphemeral(options))).toEqual([
+      true,
+      true,
+      true,
+    ]);
     expect(embedsOf(roulette.options)[0]?.title).toBe(rouletteHelpEmbed('en-US').toJSON().title);
     expect(embedsOf(blackjack.options)[0]?.title).toBe(blackjackHelpEmbed('en-US').toJSON().title);
+    expect(embedsOf(slots.options)[0]?.title).toBe(slotsHelpEmbed('en-US').toJSON().title);
   });
 });

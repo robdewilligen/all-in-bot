@@ -24,6 +24,21 @@ export const gameConfig = {
     maxSitOuts: 2,
     betModalSeconds: 300,
   },
+  slots: {
+    weights: { cherry: 10, lemon: 7, orange: 6, grape: 4, bell: 3, diamond: 1, seven: 1 },
+    paytable: [
+      { symbol: 'seven', count: 3, multiplier: 100 },
+      { symbol: 'diamond', count: 3, multiplier: 50 },
+      { symbol: 'bell', count: 3, multiplier: 25 },
+      { symbol: 'grape', count: 3, multiplier: 15 },
+      { symbol: 'orange', count: 3, multiplier: 10 },
+      { symbol: 'lemon', count: 3, multiplier: 8 },
+      { symbol: 'cherry', count: 3, multiplier: 5 },
+      { symbol: 'cherry', count: 2, multiplier: 3 },
+    ],
+    jackpotFrom: 50,
+    revealDelayMs: 700,
+  },
 } as const;
 
 export type GameConfig = typeof gameConfig;

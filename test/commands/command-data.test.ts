@@ -12,6 +12,7 @@ import leaderboard from '../../src/commands/economy/leaderboard.js';
 import blackjack from '../../src/commands/games/blackjack.js';
 import createTable from '../../src/commands/games/create-table.js';
 import roulette from '../../src/commands/games/roulette.js';
+import spin from '../../src/commands/games/spin.js';
 import help from '../../src/commands/general/help.js';
 
 const commands: Readonly<Record<string, Command>> = {
@@ -20,6 +21,7 @@ const commands: Readonly<Record<string, Command>> = {
   leaderboard,
   roulette,
   blackjack,
+  spin,
   'create-table': createTable,
   help,
 };
@@ -92,6 +94,7 @@ describe('command options (SPEC §3)', () => {
           { name: 'Economy', value: 'economy' },
           { name: 'Roulette', value: 'roulette' },
           { name: 'Blackjack', value: 'blackjack' },
+          { name: 'Slots', value: 'slots' },
         ],
       }),
     ]);
@@ -109,19 +112,19 @@ describe('command options (SPEC §3)', () => {
     ]);
   });
 
-  it.each([['blackjack', blackjack]] as const)(
-    '/%s has a required bet string with autocomplete',
-    (_name, command) => {
-      expect(command.data.toJSON().options).toEqual([
-        expect.objectContaining({
-          type: ApplicationCommandOptionType.String,
-          name: 'bet',
-          required: true,
-          autocomplete: true,
-        }),
-      ]);
-    },
-  );
+  it.each([
+    ['blackjack', blackjack],
+    ['spin', spin],
+  ] as const)('/%s has a required bet string with autocomplete', (_name, command) => {
+    expect(command.data.toJSON().options).toEqual([
+      expect.objectContaining({
+        type: ApplicationCommandOptionType.String,
+        name: 'bet',
+        required: true,
+        autocomplete: true,
+      }),
+    ]);
+  });
 
   it('/create-table has none', () => {
     expect(createTable.data.toJSON().options).toEqual([]);

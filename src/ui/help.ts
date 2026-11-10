@@ -5,6 +5,7 @@ import { t } from '../i18n/index.js';
 import { blackjackHelpEmbed } from './blackjack.js';
 import { colors } from './colors.js';
 import { rouletteHelpEmbed } from './roulette.js';
+import { slotsHelpEmbed } from './slots.js';
 
 /** The commands the overview lists, each with the key of its description. */
 const commands = [
@@ -13,12 +14,13 @@ const commands = [
   ['leaderboard', 'commands.leaderboard.description'],
   ['roulette', 'roulette.command.description'],
   ['blackjack', 'blackjack.command.description'],
+  ['spin', 'slots.command.description'],
   ['create-table', 'tables.command.description'],
   ['help', 'commands.help.description'],
 ] as const;
 
 /** The topics of /help (SPEC §9), in the order its choices list them. */
-export const helpTopics = ['economy', 'roulette', 'blackjack'] as const;
+export const helpTopics = ['economy', 'roulette', 'blackjack', 'slots'] as const;
 
 export type HelpTopic = (typeof helpTopics)[number];
 
@@ -26,6 +28,7 @@ const topicEmbeds: Readonly<Record<HelpTopic, (locale: string) => EmbedBuilder>>
   economy: economyEmbed,
   roulette: rouletteHelpEmbed,
   blackjack: blackjackHelpEmbed,
+  slots: slotsHelpEmbed,
 };
 
 function isHelpTopic(topic: string): topic is HelpTopic {
