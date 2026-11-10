@@ -368,6 +368,79 @@ describe('stale buttons and modals', () => {
     ]);
   });
 
+  it('leaves presses and modals of a live table to that table', async () => {
+    const context = fakeContext();
+    const id = context.tables.newTableId();
+    context.tables.add({
+      id,
+      game: 'blackjack',
+      guildId: GUILD_ID,
+      channelId: 'channel-1',
+      hasRoom: () => true,
+      close: () => Promise.resolve(),
+    });
+    const button = fakeButton(`bj:${id}:hit:3`);
+    const modal = fakeModalSubmit(`bj:${id}:bet:2`, { fields: { amount: '100' } });
+
+    await interactionCreate.execute(context, button.interaction);
+    await interactionCreate.execute(context, modal.interaction);
+
+    expect([...button.calls, ...modal.calls]).toEqual([]);
+  });
+
+  it("leaves a live table thread's lobby buttons and bet forms to that table", async () => {
+    const context = fakeContext();
+    const host = {
+      id: context.tables.newTableId(),
+      guildId: GUILD_ID,
+      threadId: 'thread-1',
+      close: () => Promise.resolve(),
+    };
+    context.tables.addHost(host);
+    const button = fakeButton(`tb:${host.id}:roulette:1`);
+    const form = fakeModalSubmit(`tb:${host.id}:form-roulette:1`, { fields: { bets: '10:red' } });
+
+    await interactionCreate.execute(context, button.interaction);
+    await interactionCreate.execute(context, form.interaction);
+    expect([...button.calls, ...form.calls]).toEqual([]);
+
+    context.tables.removeHost(host);
+    const stale = fakeButton(`tb:${host.id}:roulette:1`);
+    await interactionCreate.execute(context, stale.interaction);
+    expect(stale.calls).toEqual([
+      { method: 'update', options: { components: [] } },
+      { method: 'followUp', options: closed },
+    ]);
+  });
+
+  it('answers a form the live table stopped waiting for, and leaves its buttons alone', async () => {
+    const context = fakeContext();
+    const host = {
+      id: context.tables.newTableId(),
+      guildId: GUILD_ID,
+      threadId: 'thread-1',
+      close: () => Promise.resolve(),
+      answers: (customId: string) => !customId.includes(':form-'),
+    };
+    context.tables.addHost(host);
+    const { interaction, calls } = fakeModalSubmit(`tb:${host.id}:form-roulette:1`, {
+      fields: { bets: '10:red' },
+    });
+
+    await interactionCreate.execute(context, interaction);
+
+    expect(calls).toEqual([
+      {
+        method: 'reply',
+        options: {
+          content:
+            'This form waited too long and has expired. Press the button on the table again.',
+          flags: MessageFlags.Ephemeral,
+        },
+      },
+    ]);
+  });
+
   it('answers a modal that is not attached to a message with an ephemeral notice', async () => {
     const { interaction, calls } = fakeModalSubmit('rl:4:bets:1');
     Object.assign(interaction, { isFromMessage: () => false });

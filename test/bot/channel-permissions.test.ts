@@ -10,11 +10,17 @@ import { translate } from '../../src/i18n/index.js';
 import { captureLogs } from '../helpers/context.js';
 import { fakeChatInput, TABLE_PERMISSIONS } from '../helpers/discord.js';
 
-const { Administrator, EmbedLinks, SendMessages, SendMessagesInThreads, ViewChannel } =
-  PermissionFlagsBits;
+const {
+  Administrator,
+  CreatePublicThreads,
+  EmbedLinks,
+  SendMessages,
+  SendMessagesInThreads,
+  ViewChannel,
+} = PermissionFlagsBits;
 
 describe('missingTablePermissions', () => {
-  it('finds nothing missing when the channel grants what a table needs', () => {
+  it('finds nothing missing when the channel grants what a table thread needs', () => {
     const { interaction } = fakeChatInput('roulette');
 
     expect(missingTablePermissions(interaction)).toEqual([]);
@@ -22,7 +28,8 @@ describe('missingTablePermissions', () => {
 
   it.each([
     ['ViewChannel', ViewChannel],
-    ['SendMessages', SendMessages],
+    ['CreatePublicThreads', CreatePublicThreads],
+    ['SendMessagesInThreads', SendMessagesInThreads],
     ['EmbedLinks', EmbedLinks],
   ] as const)('names %s when it is missing', (name, bit) => {
     const { interaction } = fakeChatInput('roulette', { appPermissions: TABLE_PERMISSIONS & ~bit });
@@ -30,25 +37,21 @@ describe('missingTablePermissions', () => {
     expect(missingTablePermissions(interaction)).toEqual([name]);
   });
 
-  it('names every missing permission', () => {
-    const { interaction } = fakeChatInput('roulette', { appPermissions: 0n });
+  it('names every missing permission, and Send Messages is not one of them', () => {
+    const { interaction } = fakeChatInput('roulette', { appPermissions: SendMessages });
 
     expect(missingTablePermissions(interaction)).toEqual([
       'ViewChannel',
-      'SendMessages',
+      'CreatePublicThreads',
+      'SendMessagesInThreads',
       'EmbedLinks',
     ]);
   });
 
-  it('needs Send Messages in Threads instead of Send Messages inside a thread', () => {
-    const withoutThreads = fakeChatInput('roulette', { inThread: true });
-    const withThreads = fakeChatInput('roulette', {
-      inThread: true,
-      appPermissions: ViewChannel | SendMessagesInThreads | EmbedLinks,
-    });
+  it('asks the same inside a thread, which has the permissions of its channel', () => {
+    const { interaction } = fakeChatInput('roulette', { inThread: true });
 
-    expect(missingTablePermissions(withoutThreads.interaction)).toEqual(['SendMessagesInThreads']);
-    expect(missingTablePermissions(withThreads.interaction)).toEqual([]);
+    expect(missingTablePermissions(interaction)).toEqual([]);
   });
 
   it('finds nothing missing for an administrator', () => {
@@ -62,18 +65,19 @@ describe('missingPermissionsMessage', () => {
   it('names each missing permission for the player', () => {
     const message = missingPermissionsMessage('en-US', [
       'ViewChannel',
+      'CreatePublicThreads',
       'SendMessagesInThreads',
       'EmbedLinks',
     ]);
 
     expect(translate('en-US', message)).toBe(
-      "I can't open a table in this channel. I'm missing: View Channel, Send Messages in Threads, Embed Links.",
+      "I can't open a table in this channel. I'm missing: View Channel, Create Public Threads, Send Messages in Threads, Embed Links.",
     );
   });
 
   it('reaches the player as an ephemeral error through a PlayerError', async () => {
     const { interaction, calls } = fakeChatInput('roulette', {
-      appPermissions: TABLE_PERMISSIONS & ~EmbedLinks,
+      appPermissions: TABLE_PERMISSIONS & ~CreatePublicThreads,
     });
     const missing = missingTablePermissions(interaction);
 
@@ -87,7 +91,7 @@ describe('missingPermissionsMessage', () => {
       {
         method: 'reply',
         options: {
-          content: "I can't open a table in this channel. I'm missing: Embed Links.",
+          content: "I can't open a table in this channel. I'm missing: Create Public Threads.",
           flags: MessageFlags.Ephemeral,
         },
       },

@@ -15,6 +15,13 @@
       "when": 1794252304661,
       "tag": "0001_ledger_append_only",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1794337812360,
+      "tag": "0002_table_counters",
+      "breakpoints": true
     }
   ]
 }

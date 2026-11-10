@@ -1,8 +1,11 @@
 import pino from 'pino';
 import { vi, type Mock } from 'vitest';
+import { TableRefunds } from '../../src/bot/tables/refunds.js';
+import { TableRegistry } from '../../src/bot/tables/registry.js';
 import type { AppContext } from '../../src/bot/types.js';
 import type { Logger } from '../../src/core/logger.js';
 import type { Wallet } from '../../src/core/wallet.js';
+import { fakeHosts, type FakeHosts } from './tables.js';
 
 export type FakeWallet = Wallet & { readonly [K in keyof Wallet]: Mock<Wallet[K]> };
 
@@ -35,15 +38,31 @@ export function fakeWallet(): FakeWallet {
 
 export interface FakeContext extends AppContext {
   readonly wallet: FakeWallet;
+  readonly hosts: FakeHosts;
 }
 
-/** A context with a fake wallet, a silent logger, a fixed clock and no cooldowns. */
-export function fakeContext(overrides: Partial<Omit<AppContext, 'wallet'>> = {}): FakeContext {
+/** The boot ID of fake registries: table IDs are `t-1`, `t-2`… */
+export const BOOT_ID = 't';
+
+/**
+ * A context with a fake wallet, a silent logger, a fixed clock and no cooldowns.
+ * - Its refunds use that wallet and retry after REFUND_RETRY_MS, so a test with fake timers can
+ *   run the retries.
+ * - Its hosts are fakeHosts(); a TableHost test builds its context with the real ones.
+ */
+export function fakeContext(
+  overrides: Partial<Omit<AppContext, 'wallet' | 'hosts'>> = {},
+): FakeContext {
+  const wallet = fakeWallet();
+  const logger = overrides.logger ?? pino({ level: 'silent' });
   return {
-    wallet: fakeWallet(),
-    logger: pino({ level: 'silent' }),
+    wallet,
+    logger,
     clock: () => FIXED_NOW,
     cooldowns: { hit: () => null },
+    tables: new TableRegistry(BOOT_ID),
+    refunds: new TableRefunds(wallet, logger),
+    hosts: fakeHosts(),
     ...overrides,
   };
 }

@@ -1,6 +1,7 @@
 import { asc, eq, sql } from 'drizzle-orm';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { PlayerError } from '../../src/core/errors.js';
+import { TableRoundClosedError } from '../../src/core/wallet.js';
 import { ledgerEntries, players, rounds, tableRounds } from '../../src/db/schema.js';
 import {
   GUILD,
@@ -382,12 +383,29 @@ describe('table rounds', () => {
       [player(2).userId]: 1_000,
       [player(5).userId]: 800,
     });
-    await expect(wallet.refundTableRound(tableRoundId)).rejects.toThrow(/refunded/);
+    await expect(wallet.refundTableRound(tableRoundId)).rejects.toMatchObject({
+      name: 'TableRoundClosedError',
+      status: 'refunded',
+    });
     const nextTable = await wallet.openTableRound(GUILD, 'roulette');
     await expect(wallet.openRound(player(1), nextTable, 100)).resolves.toMatchObject({
       balance: 900,
     });
     expect(await ledgerMismatches(db)).toEqual([]);
+  });
+
+  it('tells a table whose settlement answer got lost that the round was settled', async () => {
+    const { tableRoundId, roundIds } = await seatedTable([100]);
+    const [roundId = 0] = roundIds;
+    await wallet.settleTableRound(tableRoundId, { number: 7 }, [{ roundId, payout: 0 }]);
+
+    const refund = wallet.refundTableRound(tableRoundId);
+    await expect(refund).rejects.toBeInstanceOf(TableRoundClosedError);
+    await expect(refund).rejects.toMatchObject({ tableRoundId, status: 'settled' });
+    await expect(
+      wallet.settleTableRound(tableRoundId, { number: 7 }, [{ roundId, payout: 0 }]),
+    ).rejects.toMatchObject({ status: 'settled' });
+    expect(await wallet.balanceOf(player(1))).toBe(900);
   });
 
   it('refunds at startup an open round whose table round already closed', async () => {

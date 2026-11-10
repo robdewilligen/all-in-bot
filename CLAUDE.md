@@ -42,7 +42,7 @@ src/
   db/                  Drizzle schema, pg Pool, migrator
   core/                wallet (all money), amount parser, RNG, time helpers, errors
   games/               pure game engines: roulette, blackjack, slots
-  bot/                 discord.js glue: loaders, cooldowns, error replies, shared options, tables (registry, roulette, blackjack)
+  bot/                 discord.js glue: loaders, cooldowns, error replies, shared options, tables (registry, threads, refunds, roulette, blackjack)
   commands/<group>/    one slash command per file (default export)
   events/              one client event per file (default export)
   ui/                  embeds and buttons per game
@@ -78,7 +78,7 @@ Boundaries:
 - Intents: `Guilds` only. No privileged intents, no message content.
 - Acknowledge every interaction within 3 seconds; use `deferReply` when work might take longer. Ephemeral replies use `flags: MessageFlags.Ephemeral`.
 - Current APIs only: `withResponse: true` instead of `fetchReply`, `Events.ClientReady`, and `setContexts(InteractionContextType.Guild)` plus `setIntegrationTypes(ApplicationIntegrationType.GuildInstall)` instead of `setDMPermission`.
-- Tables (roulette, blackjack) are ordinary bot messages in the channel, so they outlive the 15-minute interaction token. A component collector on the table message handles the buttons, with phase timers (betting, turns) instead of one idle timeout, and each table handles one action at a time. Only the player whose seat or turn it is can act; anyone else gets an ephemeral notice. Catch errors inside collector callbacks.
+- Every table is a public thread (`src/bot/tables/table.ts`) that hosts one game at a time and shows a lobby between games. A game's table message is an ordinary bot message in that thread, so it outlives the 15-minute interaction token. With only the Guilds intent the bot hears of no message deletes, so a table learns it is lost from a failed edit (`isLostTableError`). A component collector on the table message handles the buttons, with phase timers (betting, turns) instead of one idle timeout, and each table handles one action at a time. Only the player whose seat or turn it is can act; anyone else gets an ephemeral notice. Catch errors inside collector callbacks.
 - One shared error helper: player errors are ephemeral and specific, unexpected errors are logged and get a generic message (`followUp` when the interaction was already replied to or deferred).
 - A `followUp` straight after a public `deferReply` replaces the loading message and ignores the Ephemeral flag, so an error would show publicly. A command that defers and can still throw a `PlayerError` defers ephemerally or validates first.
 - Log Discord errors through `loggableError()` (`src/bot/errors.ts`): REST errors carry the request URL, and interaction routes put the token in it.

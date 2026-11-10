@@ -37,7 +37,7 @@ On Windows, `setup.cmd` does most of this for you (see [Windows setup](#windows-
    | `LOG_LEVEL` | no | Default `info` |
 
 2. **Database.** `npm run db:migrate` brings the database in `DATABASE_URL` up to date. Each database belongs to exactly one bot process: at startup the bot refunds every open round it finds, which would hit another instance's live tables.
-3. **Discord.** Invite the bot with the scopes `bot` and `applications.commands` and the permissions View Channels, Send Messages and Embed Links; roulette and blackjack tables need those three in their channel. Then `npm run deploy:commands` registers the slash commands: in `DEV_GUILD_ID` when it's set, otherwise globally.
+3. **Discord.** Invite the bot with the scopes `bot` and `applications.commands`, and the permissions View Channels, Create Public Threads, Send Messages in Threads and Embed Links. Every roulette and blackjack table is a thread, so the bot needs those four in each channel where tables open. It posts nothing in the channel itself, so it doesn't need Send Messages. Then `npm run deploy:commands` registers the slash commands: in `DEV_GUILD_ID` when it's set, otherwise globally.
 4. **Run.** `npm run dev` for development, or `npm run build` and `npm start`.
 
 Tests: `npm test` needs `TEST_DATABASE_URL`. `npm test -- --project unit` runs everything except the database tests.
@@ -52,7 +52,10 @@ Tests: `npm test` needs `TEST_DATABASE_URL`. `npm test -- --project unit` runs e
 | `/roulette` | Place bets on the next spin of a shared roulette table |
 | `/blackjack` | Take a seat at a shared blackjack table |
 | `/spin` | Slot machine |
+| `/create-table` | Open a table thread where the players pick a game |
 | `/help` | Rules, notation and payouts |
+
+Every table is its own thread, such as `Table #12 (Roulette)`, so the channel stays clean. `/roulette` and `/blackjack` find a table with room or open one. `/create-table` opens an empty table: its lobby has a button per game, which asks for your bet. After each game, the lobby comes back: play again, switch games, or leave. A table closes when its last player leaves, or after 10 minutes without a new game.
 
 ## Windows setup
 
@@ -123,6 +126,12 @@ Run on a real PC; send the logs from `%LOCALAPPDATA%\all-in\logs` when something
 - [ ] **Adopting the reference script**: on a PC set up with `setup-allin-db.ps1`, `.\setup.cmd` keeps the data and passwords, renames `compose.yaml`, and `Get-ScheduledTask 'All-in database backup'` shows the new task.
 - [ ] **`-CheckOnly`**: `.\setup.cmd -CheckOnly` changes nothing (no prompt, no new files) and reports every item.
 - [ ] **`-Dev`**: on a development PC, `.\setup.cmd -Dev` installs Git and Node.js when missing, creates `.env` and runs the migrations on `allin_dev`.
+- [ ] **Tables in threads** (Discord):
+  - `/create-table` opens `Table #N` with a lobby and posts nothing in the channel;
+  - Roulette in the lobby asks for bets, and after the spin the lobby returns;
+  - choosing Blackjack renames the thread to `Table #N (Blackjack)`;
+  - Leave table from the last player archives the thread;
+  - `/roulette` in a channel opens `Table #N+1 (Roulette)`.
 
 ## Development
 

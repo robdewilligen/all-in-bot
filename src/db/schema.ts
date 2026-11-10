@@ -162,3 +162,9 @@ export const ledgerEntries = pgTable(
     index('ledger_entries_player_idx').on(table.guildId, table.userId, table.createdAt),
   ],
 );
+
+/** The last table number per server, for thread names like "Table #12" (SPEC §4). Not money. */
+export const guildTableCounters = pgTable('guild_table_counters', {
+  guildId: text('guild_id').primaryKey(),
+  lastNumber: integer('last_number').notNull(),
+});

@@ -2,12 +2,16 @@ import { describe, expect, it, vi } from 'vitest';
 import { helpReply } from '../../src/ui/help.js';
 import { textOf } from '../helpers/discord.js';
 
-vi.mock('../../src/config/game.js', () => ({
-  gameConfig: {
-    stakes: { min: 25, max: 50_000 },
-    daily: { base: 2_000, streakBonus: 250, maxStreakBonus: 1_000 },
-  },
-}));
+vi.mock('../../src/config/game.js', async (importOriginal) => {
+  const real = await importOriginal<typeof import('../../src/config/game.js')>();
+  return {
+    gameConfig: {
+      ...real.gameConfig,
+      stakes: { min: 25, max: 50_000 },
+      daily: { base: 2_000, streakBonus: 250, maxStreakBonus: 1_000 },
+    },
+  };
+});
 
 describe('economy help', () => {
   it('takes every amount, day and limit from the game config', () => {

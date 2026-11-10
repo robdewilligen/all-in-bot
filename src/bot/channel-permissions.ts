@@ -1,23 +1,27 @@
 import type { PermissionsBitField, PermissionsString } from 'discord.js';
 import { t, type Message } from '../i18n/index.js';
 
-/** The permissions a table message needs in its channel (SPEC §4). */
+/** The permissions a table needs in the channel its thread opens in (SPEC §4). */
 export type TablePermission = Extract<
   PermissionsString,
-  'ViewChannel' | 'SendMessages' | 'SendMessagesInThreads' | 'EmbedLinks'
+  'ViewChannel' | 'CreatePublicThreads' | 'SendMessagesInThreads' | 'EmbedLinks'
 >;
 
+const NEEDED: readonly TablePermission[] = [
+  'ViewChannel',
+  'CreatePublicThreads',
+  'SendMessagesInThreads',
+  'EmbedLinks',
+];
+
 interface ChannelInteraction {
-  /** The app's permissions in the interaction's channel, overwrites included. */
+  /** The app's permissions in the interaction's channel, overwrites included; a thread has its channel's. */
   readonly appPermissions: Readonly<PermissionsBitField>;
-  readonly channel: { isThread(): boolean } | null;
 }
 
 /** The table permissions the app lacks in the interaction's channel; empty when it has them all. */
 export function missingTablePermissions(interaction: ChannelInteraction): TablePermission[] {
-  const send = interaction.channel?.isThread() === true ? 'SendMessagesInThreads' : 'SendMessages';
-  const needed: readonly TablePermission[] = ['ViewChannel', send, 'EmbedLinks'];
-  return needed.filter((permission) => !interaction.appPermissions.has(permission));
+  return NEEDED.filter((permission) => !interaction.appPermissions.has(permission));
 }
 
 /** The player-facing error naming each missing permission, for a PlayerError or translate(). */

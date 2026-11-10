@@ -2,30 +2,54 @@ import { EmbedBuilder, MessageFlags, type InteractionReplyOptions } from 'discor
 import { gameConfig } from '../config/game.js';
 import { formatCoins } from '../i18n/format.js';
 import { t } from '../i18n/index.js';
+import { blackjackHelpEmbed } from './blackjack.js';
 import { colors } from './colors.js';
+import { rouletteHelpEmbed } from './roulette.js';
 
-const commands = ['dailygift', 'balance', 'leaderboard', 'help'] as const;
+/** The commands the overview lists, each with the key of its description. */
+const commands = [
+  ['dailygift', 'commands.dailygift.description'],
+  ['balance', 'commands.balance.description'],
+  ['leaderboard', 'commands.leaderboard.description'],
+  ['roulette', 'roulette.command.description'],
+  ['blackjack', 'blackjack.command.description'],
+  ['create-table', 'tables.command.description'],
+  ['help', 'commands.help.description'],
+] as const;
+
+/** The topics of /help (SPEC §9), in the order its choices list them. */
+export const helpTopics = ['economy', 'roulette', 'blackjack'] as const;
+
+export type HelpTopic = (typeof helpTopics)[number];
+
+const topicEmbeds: Readonly<Record<HelpTopic, (locale: string) => EmbedBuilder>> = {
+  economy: economyEmbed,
+  roulette: rouletteHelpEmbed,
+  blackjack: blackjackHelpEmbed,
+};
+
+function isHelpTopic(topic: string): topic is HelpTopic {
+  return (helpTopics as readonly string[]).includes(topic);
+}
 
 /** The overview, or the topic's page; an unknown topic gets the overview. */
 export function helpReply(locale: string, topic: string | null): InteractionReplyOptions {
-  const embed = topic === 'economy' ? economyEmbed(locale) : overviewEmbed(locale);
-  return { embeds: [embed], flags: MessageFlags.Ephemeral };
+  const build = topic !== null && isHelpTopic(topic) ? topicEmbeds[topic] : overviewEmbed;
+  return { embeds: [build(locale)], flags: MessageFlags.Ephemeral };
 }
 
 function overviewEmbed(locale: string): EmbedBuilder {
-  const lines = commands.map((command) =>
-    t(locale, 'help.overview.command', {
-      command,
-      description: t(locale, `commands.${command}.description` as const),
-    }),
+  const lines = commands.map(([command, description]) =>
+    t(locale, 'help.overview.command', { command, description: t(locale, description) }),
   );
+  const topics = helpTopics.map((topic) => t(locale, `help.overview.${topic}`));
   return new EmbedBuilder()
     .setColor(colors.info)
     .setTitle(t(locale, 'help.overview.title'))
     .setDescription(t(locale, 'help.overview.description'))
     .addFields(
       { name: t(locale, 'help.overview.commands'), value: lines.join('\n') },
-      { name: t(locale, 'help.overview.topics'), value: t(locale, 'help.overview.economy') },
+      { name: t(locale, 'help.overview.topics'), value: topics.join('\n') },
     );
 }
 

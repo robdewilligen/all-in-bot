@@ -5,7 +5,7 @@
 All-in is a Discord casino bot. Players get virtual coins from a daily gift and play roulette, blackjack and a slot machine. A leaderboard per server shows who has the most coins.
 
 - The bot is the dealer in every game.
-- Roulette and blackjack are played at shared tables, so players in a server play together: everyone at a roulette table bets on the same spin, and up to four players share a blackjack table and its dealer. When a table is full, a new one opens. Slots are played alone: every player has their own machine.
+- Roulette and blackjack are played at shared tables, so players in a server play together: everyone at a roulette table bets on the same spin, and up to four players share a blackjack table and its dealer. When a table is full, a new one opens. Every table is its own thread ("Table #12 (Roulette)"), so the channels stay clean, and between games its players pick the next game. Slots are played alone: every player has their own machine.
 - Everything users see (command names, option names, descriptions, replies) is in English, so the bot works in international servers. Keep all strings in `src/i18n/en.ts`, structured so another language could be added later through `interaction.locale`. No other languages for now, and no localized command names.
 - The economy is per server: balance, daily gift, streak and leaderboard are scoped to (server, user).
 - Commands only work in servers (guild install), not in DMs and not as a user-installed app.
@@ -30,6 +30,7 @@ The README states this plainly for server owners. Don't add features that break 
 | `/roulette` | `bets` (string, max 500 characters, required, autocomplete) | Place one or more bets on the next spin of a shared European roulette table |
 | `/blackjack` | `bet` (string, required, autocomplete) | Take a seat at a shared blackjack table, with your bet for the next round |
 | `/spin` | `bet` (string, required, autocomplete) | Slot machine |
+| `/create-table` | none | Open a table thread where the players pick a game (§4); cooldown 30 seconds |
 | `/help` | `topic` (choice: economy, roulette, blackjack, slots; optional) | Rules, notation and payouts |
 
 ## 4. Shared behaviour
@@ -55,11 +56,39 @@ The README states this plainly for server owners. Don't add features that break 
 
 **Shared tables** (roulette and blackjack):
 
-- **Seating.** A player joins a table of that game with room in the current channel. Without one, they join any table of that game in the server with room. Without one either, a new table opens in the current channel. A player who joins a table in another channel gets an ephemeral confirmation with a link to the table message. A player plays at most one table per game per server.
-- **Table messages.** A table is an ordinary bot message in its channel, not an interaction reply, so it keeps working after the 15-minute interaction token expires. Opening a table needs the View Channel, Send Messages and Embed Links permissions in that channel; when one is missing, the player gets an ephemeral error that names it.
-- **State.** Tables live in memory, keyed by server and table ID. Each table handles one action at a time (a per-table lock), so concurrent button presses and commands can't interleave.
-- **Money.** Every player at a table has their own round in the database: open, with the stake reserved, until the shared outcome settles all players at the table in one transaction.
-- **Restarts.** Open rounds are refunded at startup. A press on a button of a table that no longer exists removes the buttons and replies ephemerally that the table closed and open stakes were refunded.
+- **Tables are threads.** Every table is a public thread that the bot starts in a channel, without posting anything in the channel itself, so the channel stays clean.
+  - The thread is named `Table #N`, plus the game being played: `Table #12 (Roulette)`. N counts the tables of the server (1, 2, 3…), is stored in the database and never restarts.
+  - The thread is renamed when the table switches games. Discord allows two renames per 10 minutes; past that, the name follows at the next switch.
+  - A thread auto-archives after a day without messages, and a closed table archives its thread at once.
+- **Opening a table.**
+  - `/create-table` opens a table with its lobby in the current channel (inside a thread: in that thread's channel), and the player gets an ephemeral link to it.
+  - `/roulette` and `/blackjack` open a table themselves when the seating rule finds none; it is named after its game from the start.
+  - Opening a table needs the View Channel, Create Public Threads, Send Messages in Threads and Embed Links permissions in the channel. When one is missing, the player gets an ephemeral error that names it.
+  - Where no thread can be started (the chat of a voice channel, a forum post), the player gets an ephemeral error.
+- **The lobby.** Between games a table shows a lobby message with the table's players and the buttons Roulette, Blackjack and Leave table.
+  - A game button opens a bet form (roulette: the bet notation; blackjack: an amount), which plays exactly like the command typed in the thread.
+  - The first bet starts that game: the lobby loses its buttons, and the game's table message is posted in the thread.
+  - When the game is over (a roulette spin after its result, or a blackjack game once its last seat is empty), a new lobby message appears. The players can then play the same game again, switch games, or leave.
+  - The players of a table are its creator and everyone who bet there; Leave table removes a player.
+  - A table closes when its last player leaves, or when no game starts within 10 minutes of a lobby. The lobby then says so, and the thread is archived.
+- **Seating.**
+  - A player plays at their own table of that game first: at most one table per game per server.
+  - Inside a table's thread, a command plays at that table: it joins its game, or starts the game from its lobby. When the table plays the other game or has no room, the player gets an ephemeral error.
+  - Anywhere else, a player joins a table of that game with room in the current channel (a thread counts as its channel). Without one, they join a table with room in another channel of the server that they can see. Without one either, a new table opens in the current channel.
+  - Every confirmation links to the table message.
+- **Table messages.** A game's table message is an ordinary bot message in the thread, not an interaction reply, so it keeps working after the 15-minute interaction token expires.
+- **State.** Tables live in memory, keyed by server and table ID. Each table and each game handles one action at a time, so concurrent presses and commands can't interleave, and seating runs one command at a time per server.
+- **Money.**
+  - Every player in a game has their own round in the database: open, with the stake reserved, until the shared outcome settles all players in the game in one transaction.
+  - The first bet at a new table is debited before its thread is created, so a refused bet leaves nothing behind.
+  - A round that can't be settled is refunded. When the refund fails too, it is retried in the background (after 5 s, 30 s, 2 min, then every 10 min) until it goes through.
+- **Lost tables.**
+  - With only the Guilds intent the bot isn't told when a message is deleted, so a failed edit is how a table finds out: an unknown message or channel, missing access or permissions, or an archived thread. A deleted thread is handled the same way.
+  - A blackjack game then closes and refunds its open round. A roulette spin stops seating players, but still settles and sends the private results.
+  - Either way, the table closes.
+- **Restarts.**
+  - On shutdown, every game's message says it closed, and the table threads are archived. Open rounds are refunded at startup.
+  - Table IDs carry a per-process boot ID, so a button from before a restart never matches a new table. A press on a button of a table that no longer exists removes the buttons and replies ephemerally that the table closed and open stakes were refunded.
 
 ## 5. Economy
 
@@ -133,11 +162,14 @@ Tests check that each announced bet covers exactly its sector of the wheel: vois
 
 ### Table round
 
-- `/roulette` places the player's bets on the next spin of a roulette table, chosen by the seating rule (§4). The first bets open a betting round with a 30-second countdown (`<t:…:R>`) on the table message. Until it closes, other players join and players add bets with more `/roulette` commands, within their per-spin limits. At most 20 players per round; the 21st opens a new table.
+- `/roulette`, or the Roulette button of a table's lobby, places the player's bets on the next spin at a roulette table chosen by the seating rule (§4).
+  - The first bets open a betting round with a 30-second countdown (`<t:…:R>`) on the table message.
+  - Until it closes, other players join, and players add bets with more `/roulette` commands, within their per-spin limits.
+  - At most 20 players per round; the 21st opens a new table.
 - Bets are debited when placed: the player's round is open with the stake reserved. The player gets an ephemeral confirmation with their bets so far and a link to the table.
 - When the countdown ends: one CSPRNG draw from 0 to 36, and every player at the table is settled in one transaction. The table message then shows "The ball is rolling…" and, about 1.5 seconds later, the result: number and colour, and one line per player with stake, payout and net result.
 - Each player also gets their own result as an ephemeral follow-up on their latest `/roulette` interaction: every bet with ✅ or ❌ and its payout, total stake, total payout, new balance and net result.
-- After the result the table closes; the next `/roulette` opens a new one.
+- After the result the spin is over, and the table shows its lobby (§4).
 - Autocomplete on `bets` is a live preview: "✓ 3 bets · total 🪙 30" or "✗ <the parse error>" (at most 100 characters). Its value is what the player typed, so choosing it keeps the input; input longer than 100 characters gets no suggestions. With an empty field it shows a hint that points to `/help topic:roulette`.
 
 ## 7. Blackjack
@@ -156,14 +188,18 @@ Tests check that each announced bet covers exactly its sector of the wheel: vois
 
 ### Table and seats
 
-A table has 4 seats and plays round after round for as long as players are seated.
+A blackjack game has 4 seats and plays round after round for as long as players are seated.
 
-- **Taking a seat.** `/blackjack bet:<amount>` takes a free seat by the seating rule (§4), with that amount as the player's bet for the next round, or for the round that's about to start. A player who already has a seat in this server changes their bet for the next round instead, and gets a link to their table.
-- **Betting** (20 seconds, shown as a countdown; it ends early once every seated player has bet). Buttons: Same bet (🪙 X), Change bet (a modal with an amount field, using the shared parser and limits) and Leave. Placing a bet opens the player's round in the database (status `open`, stake reserved). A player who doesn't bet sits out the round; after 2 rounds in a row sitting out, they lose their seat. A table without seated players closes: its message says so and loses its buttons.
+- **Taking a seat.** `/blackjack bet:<amount>`, or the Blackjack button of a table's lobby, takes a free seat by the seating rule (§4). That amount is the player's bet for the next round, or for the round that's about to start. A player who already has a seat in this server changes their bet for the next round instead, and gets a link to their table.
+- **Betting** (20 seconds, shown as a countdown; it ends early once every seated player has bet).
+  - Buttons: Same bet (🪙 X), Change bet (a modal with an amount field, using the shared parser and limits) and Leave.
+  - Placing a bet opens the player's round in the database (status `open`, stake reserved).
+  - A player who doesn't bet sits out the round; after 2 rounds in a row sitting out, they lose their seat.
+  - When the last seat is empty the game is over: its message says so and loses its buttons, and the table shows its lobby (§4).
 - **Deal.** In seat order, every seat with a bet gets a card, then the dealer gets the upcard, then every seat gets a second card, then the dealer gets the hole card.
 - **Insurance.** When the dealer shows an ace, every seat answers at once (20 seconds; no answer means no insurance) with Insurance (with its cost) or No insurance, or Even money or No even money for a player with blackjack. Each player answers only for themselves. Then the dealer peeks.
 - **Turns.** Seats act in order, 45 seconds per turn. Buttons: Hit, Stand, Double (with its cost), Split (with its cost) and Surrender; buttons the active player isn't allowed to use or can't afford are disabled. Only the active player can act; anyone else gets an ephemeral notice saying whose turn it is. On timeout the bot stands on that player's remaining hands and notes that it stood automatically.
-- **Settlement.** The dealer plays, but doesn't draw when every hand is busted, surrendered or already settled. Every seat settles in one transaction, the message shows the results, and the next betting phase starts.
+- **Settlement.** The dealer plays, but doesn't draw when every hand is busted, surrendered or already settled. Every seat settles in one transaction, the message shows the results, and the next betting phase starts. When the settlement fails, the round is refunded (§4), the message says what became of the stakes, and the game ends.
 - Custom IDs: `bj:<tableId>:<action>:<step>`. The step goes up under the table lock before anything is awaited. Presses with an outdated step are acknowledged and ignored, which also handles double clicks.
 - Double, split and insurance raise the player's open round in the database before the action is applied. With too few coins the player gets an ephemeral error and nothing changes.
 - Display: dealer cards (hole card hidden until the dealer plays); per seat the player's name, each hand with its total ("soft 17", "Blackjack!", "24, bust"), its bet, a marker on the active hand, the result per hand, the insurance outcome, the net result and the new balance. Footer: a summary of the rules and the cards left in the shoe.
@@ -184,7 +220,7 @@ A table has 4 seats and plays round after round for as long as players are seate
 
 ## 9. /help
 
-Ephemeral. Without a topic it gives an overview of all commands. Topics: economy (daily gift, streaks, limits, amount syntax), roulette (the notation table, announced bets and how a betting round works), blackjack (rules, seats and buttons) and slots (paytable and payout percentage).
+Ephemeral. Without a topic it gives an overview of all commands, `/create-table` included, and says that every table is a thread. Topics: economy (daily gift, streaks, limits, amount syntax), roulette (the notation table, announced bets and how a betting round works), blackjack (rules, seats and buttons) and slots (paytable and payout percentage).
 
 ## 10. Data model and wallet
 
@@ -197,6 +233,7 @@ Discord IDs are stored as `text`. Coin columns are `bigint`; the code reads them
 | `table_rounds` | id, guild_id, game, status (open, settled, refunded), outcome (jsonb), created_at, settled_at | partial index where status = 'open' |
 | `rounds` | id, guild_id, user_id, game, table_round_id, status (open, settled, refunded), stake, payout, details (jsonb), created_at, settled_at | `stake > 0`; FK on table_round_id (null for slots); unique (guild_id, user_id, game) where status = 'open' |
 | `ledger_entries` | id, guild_id, user_id, round_id, kind (daily, stake, raise, payout, refund), amount (signed), balance_after, created_at | FK on round_id; index on (guild_id, user_id, created_at); append-only, enforced by a trigger that rejects UPDATE and DELETE |
+| `guild_table_counters` | guild_id, last_number | PK guild_id; the table numbers of §4, taken with one atomic upsert, so two tables never get the same number. Not money, so not part of the wallet |
 
 Wallet API (names may change, the guarantees may not):
 
@@ -204,7 +241,7 @@ Wallet API (names may change, the guarantees may not):
 - `claimDaily(player, now)`
 - `playInstant(player, game, stake, play)`: debit, play and credit in one transaction (slots)
 - `openTableRound`, then `openRound` and `raiseRound` for each player at the table, then `settleTableRound`, which settles the table round and all of its players' rounds in one transaction. Rows are locked through `SELECT … FOR UPDATE`.
-- `refundTableRound(id)`: refunds one open table round and its players' rounds, for a table whose settlement failed, so its players can play that game again without a restart
+- `refundTableRound(id)`: refunds one open table round and its players' rounds, for a game whose settlement failed, so its players can play that game again without a restart. A table round that is no longer open fails with an error that says whether it was settled or refunded, so a game whose settlement answer got lost can tell the players the truth. The bot retries a refund that fails until it goes through (§4).
 - `refundOpenRounds()`: called once at startup; refunds open rounds and marks their table rounds refunded
 
 Tests, against `TEST_DATABASE_URL`:
@@ -216,8 +253,9 @@ Tests, against `TEST_DATABASE_URL`:
 - Settling a table round with 4 players is atomic: an error rolls back every player.
 - A player can't hold two open rounds of the same game in one server.
 - Open rounds are refunded exactly once.
+- Table numbers count 1, 2, 3 per server, and concurrent calls never get the same number.
 
-Infrastructure: one `pg.Pool` for the whole app, closed on shutdown, connecting through `DATABASE_URL`. drizzle-kit generates migrations into `drizzle/`; they are reviewed, committed and applied with `npm run db:migrate`. Migrations run as an explicit step, not automatically when the bot starts (the Docker image runs them right before starting the bot).
+Infrastructure: one `pg.Pool` for the whole app, closed on shutdown, connecting through `DATABASE_URL`. The bot's pool has timeouts: 5 s to connect, 10 s per statement, 15 s per query and 30 s idle in a transaction. A hung database call therefore fails instead of holding a table and its server's seating forever. drizzle-kit generates migrations into `drizzle/`; they are reviewed, committed and applied with `npm run db:migrate`. Migrations run as an explicit step, not automatically when the bot starts (the Docker image runs them right before starting the bot).
 
 ## 11. Configuration
 
@@ -233,7 +271,7 @@ Infrastructure: one `pg.Pool` for the whole app, closed on shutdown, connecting 
 | `DAILY_RESET_TIMEZONE` | no | Default `Europe/Amsterdam` |
 | `LOG_LEVEL` | no | Default `info` |
 
-Game settings (limits, daily amounts, blackjack rules, table sizes and timers, reel weights, paytable) live in a typed config module, not in `.env`.
+Game settings (limits, daily amounts, blackjack rules, table sizes and timers, the lobby timeout, reel weights, paytable) live in a typed config module, not in `.env`.
 
 ## 12. Deliverables
 
@@ -254,10 +292,10 @@ Every phase ends with `npm run check`, a summary and a commit. Wait for approval
 3. **Roulette**: table, parser and settlement with tests (157 legal bets, notation cases, announced bets, house edge), then the shared table round (seating, 30-second betting window, settling every player, reveal) and the command with its autocomplete preview.
 4. **Blackjack**, in two parts that each end with `npm run check`, a summary and a commit:
    - 4a. **Engine**: shoe and multi-seat engine with stacked-deck tests, and the simulation script.
-   - 4b. **Tables**: seats, betting phase, insurance, turns and their timers, the bet modal, stale-button handling and startup refunds.
+   - 4b. **Tables**: seats, betting phase, insurance, turns and their timers, the bet modal, stale-button handling and startup refunds. Then the table threads that roulette and blackjack share: a thread per table, `/create-table`, the lobby with its bet forms, and the table numbers.
 5. **Slot machine**: the machine, the exact RTP test and script, and the command with its reveal.
 6. **Hardening**: graceful shutdown (close the tables, destroy the client, end the pool), a logging review, README, deploy files and a final `npm run check`.
 
 ## 14. Done by the human
 
-Outside the repo and not your job: creating the Discord applications (All-in and All-in Dev) and their tokens, inviting the bot (scopes `bot` and `applications.commands`; permissions View Channels, Send Messages and Embed Links), installing PostgreSQL and creating the databases, and hosting. Ask for what you need through `.env`; never ask for secrets in chat.
+Outside the repo and not your job: creating the Discord applications (All-in and All-in Dev) and their tokens, inviting the bot (scopes `bot` and `applications.commands`; permissions View Channels, Create Public Threads, Send Messages in Threads and Embed Links), installing PostgreSQL and creating the databases, and hosting. Ask for what you need through `.env`; never ask for secrets in chat.

@@ -2,8 +2,11 @@
 export const gameConfig = {
   stakes: { min: 10, max: 1_000_000 },
   daily: { base: 1_000, streakBonus: 100, maxStreakBonus: 700 },
-  cooldowns: { defaultSeconds: 3, leaderboardSeconds: 5 },
+  cooldowns: { defaultSeconds: 3, leaderboardSeconds: 5, createTableSeconds: 30 },
   leaderboard: { pageSize: 10 },
+  /** Table threads (SPEC §4): a lobby without a new game closes; a bet form waits this long. */
+  tables: { lobbyMinutes: 10, formSeconds: 300, renamesPerTenMinutes: 2 },
+  roulette: { bettingSeconds: 30, maxPlayers: 20, maxBetsPerSpin: 30, revealDelayMs: 1_500 },
   blackjack: {
     decks: 6,
     cutCardPercent: 75,
@@ -12,6 +15,14 @@ export const gameConfig = {
     maxHands: 4,
     doubleAfterSplit: true,
     lateSurrender: true,
+  },
+  blackjackTable: {
+    seats: 4,
+    bettingSeconds: 20,
+    insuranceSeconds: 20,
+    turnSeconds: 45,
+    maxSitOuts: 2,
+    betModalSeconds: 300,
   },
 } as const;
 

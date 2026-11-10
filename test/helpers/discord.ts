@@ -1,7 +1,10 @@
+import { EventEmitter } from 'node:events';
 import {
   ApplicationCommandOptionType,
+  ChannelType,
   Collection,
   ComponentType,
+  DiscordAPIError,
   EmbedBuilder,
   MessageFlags,
   MessageFlagsBitField,
@@ -26,7 +29,8 @@ export const BOT_ID = '900000000000000001';
 /** What a table needs in its channel (SPEC §4); fakes have these unless a test says otherwise. */
 export const TABLE_PERMISSIONS =
   PermissionFlagsBits.ViewChannel |
-  PermissionFlagsBits.SendMessages |
+  PermissionFlagsBits.CreatePublicThreads |
+  PermissionFlagsBits.SendMessagesInThreads |
   PermissionFlagsBits.EmbedLinks;
 
 export type ResponseMethod =
@@ -69,6 +73,10 @@ export interface FakeOptions {
   readonly appPermissions?: bigint;
   readonly inThread?: boolean;
   readonly commands?: Collection<string, Command>;
+  /** The channel the interaction happens in; give a FakeChannel when the code opens a table. */
+  readonly channel?: FakeChannel;
+  /** Channels the member can't see; every other channel of the server is visible to them. */
+  readonly hiddenChannels?: readonly string[];
 }
 
 export interface ChatInputOptions extends FakeOptions {
@@ -128,7 +136,7 @@ function getter<T>(
 
 function base(kind: Kind, options: FakeOptions, calls: ResponseCall[]): object {
   const guildId = options.guildId ?? GUILD_ID;
-  const channelId = options.channelId ?? CHANNEL_ID;
+  const channelId = options.channel?.id ?? options.channelId ?? CHANNEL_ID;
   const user = options.user ?? fakeUser(USER_ID);
   const message = fakeMessage(guildId, channelId);
   const state = { replied: false, deferred: false, ephemeral: null as boolean | null };
@@ -169,8 +177,29 @@ function base(kind: Kind, options: FakeOptions, calls: ResponseCall[]): object {
       user,
       displayName: options.displayName ?? user.globalName ?? user.username,
     },
-    guild: { id: guildId, name: 'Test Server' },
-    channel: { id: channelId, isThread: () => options.inThread ?? false },
+    guild: {
+      id: guildId,
+      name: 'Test Server',
+      channels: {
+        cache: {
+          get: (id: string) => ({
+            id,
+            permissionsFor: () =>
+              new PermissionsBitField(
+                options.hiddenChannels?.includes(id) === true
+                  ? 0n
+                  : PermissionFlagsBits.ViewChannel,
+              ),
+          }),
+        },
+      },
+    },
+    channel: options.channel ?? {
+      id: channelId,
+      parentId: null,
+      parent: null,
+      isThread: () => options.inThread ?? false,
+    },
     client: {
       commands: options.commands ?? new Collection<string, Command>(),
       user: { id: BOT_ID },
@@ -288,16 +317,33 @@ export function fakeAutocomplete(
   return { interaction: interaction as unknown as AutocompleteInteraction<'cached'>, calls };
 }
 
+export interface ComponentOptions extends FakeOptions {
+  /** The table message the button is on; update() then edits it, as on Discord. */
+  readonly message?: FakeMessage;
+}
+
 export function fakeButton(
   customId: string,
-  options: FakeOptions = {},
+  options: ComponentOptions = {},
 ): Fake<ButtonInteraction<'cached'>> {
   const calls: ResponseCall[] = [];
+  const { message } = options;
   const interaction = Object.assign(base('button', options, calls), {
     customId,
     componentType: ComponentType.Button,
-    message: fakeMessage(options.guildId ?? GUILD_ID, options.channelId ?? CHANNEL_ID),
+    message: message ?? fakeMessage(options.guildId ?? GUILD_ID, options.channelId ?? CHANNEL_ID),
   });
+  if (message !== undefined) {
+    const update = (interaction as unknown as { update: (payload: unknown) => Promise<unknown> })
+      .update;
+    Object.assign(interaction, {
+      update: async (payload: unknown) => {
+        const result = await update(payload);
+        message.edits.push(payload);
+        return result;
+      },
+    });
+  }
   return { interaction: interaction as unknown as ButtonInteraction<'cached'>, calls };
 }
 
@@ -319,6 +365,212 @@ export function fakeModalSubmit(
     message: fakeMessage(options.guildId ?? GUILD_ID, options.channelId ?? CHANNEL_ID),
   });
   return { interaction: interaction as unknown as ModalSubmitInteraction<'cached'>, calls };
+}
+
+/** A component collector a test feeds presses into, like a table message's collector. */
+export class FakeCollector extends EventEmitter {
+  #ended = false;
+
+  constructor(readonly options: unknown) {
+    super();
+  }
+
+  get ended(): boolean {
+    return this.#ended;
+  }
+
+  /**
+   * Hands a press to the 'collect' listeners, as discord.js does. Listeners return nothing (lint),
+   * so a test waits for the table's own queue, not for this call.
+   */
+  collect(interaction: unknown): void {
+    if (this.#ended) throw new Error('collect: this collector has ended');
+    this.emit('collect', interaction);
+  }
+
+  stop(reason = 'user'): void {
+    if (this.#ended) return;
+    this.#ended = true;
+    this.emit('end', new Collection(), reason);
+  }
+}
+
+/** A message the bot sent; it records every edit and the collectors made on it. */
+export class FakeMessage {
+  readonly edits: unknown[] = [];
+  readonly collectors: FakeCollector[] = [];
+  deleted = false;
+  /** Set it, for instance to discordError(10008), and every later edit rejects with it. */
+  editError: Error | undefined = undefined;
+
+  constructor(
+    readonly id: string,
+    readonly channelId: string,
+    readonly guildId: string,
+    readonly sent: unknown,
+  ) {}
+
+  get url(): string {
+    return `https://discord.com/channels/${this.guildId}/${this.channelId}/${this.id}`;
+  }
+
+  /** What the message was last set to: the latest edit, or what it was sent with. */
+  get latest(): unknown {
+    return this.edits.length > 0 ? this.edits[this.edits.length - 1] : this.sent;
+  }
+
+  edit(options: unknown): Promise<this> {
+    if (this.editError !== undefined) return Promise.reject(this.editError);
+    this.edits.push(options);
+    return Promise.resolve(this);
+  }
+
+  delete(): Promise<this> {
+    this.deleted = true;
+    return Promise.resolve(this);
+  }
+
+  createMessageComponentCollector(options?: unknown): FakeCollector {
+    const collector = new FakeCollector(options);
+    this.collectors.push(collector);
+    return collector;
+  }
+}
+
+export interface ThreadCreateOptions {
+  readonly name: string;
+  readonly autoArchiveDuration?: number;
+  readonly reason?: string;
+}
+
+/**
+ * A text channel whose threads and messages a test can inspect; pass it as FakeOptions.channel.
+ * A table opens a FakeThread in it with `threads.create` and posts its message there.
+ */
+export class FakeChannel {
+  readonly type: ChannelType = ChannelType.GuildText;
+  readonly parentId: string | null = null;
+  readonly parent: FakeChannel | null = null;
+  readonly messages: FakeMessage[] = [];
+  readonly threadsStarted: FakeThread[] = [];
+  /** Set it and the next send rejects with it (once). */
+  sendError: Error | undefined = undefined;
+  /** Set it and the next threads.create rejects with it (once). */
+  threadError: Error | undefined = undefined;
+  readonly threads = {
+    create: (options: ThreadCreateOptions): Promise<FakeThread> => this.#startThread(options),
+  };
+  #sent = 0;
+
+  constructor(
+    readonly id: string = CHANNEL_ID,
+    readonly guildId: string = GUILD_ID,
+  ) {}
+
+  get url(): string {
+    return `https://discord.com/channels/${this.guildId}/${this.id}`;
+  }
+
+  send(options: unknown): Promise<FakeMessage> {
+    if (this.sendError !== undefined) {
+      const error = this.sendError;
+      this.sendError = undefined;
+      return Promise.reject(error);
+    }
+    this.#sent += 1;
+    const message = new FakeMessage(
+      `5${String(this.#sent).padStart(17, '0')}`,
+      this.id,
+      this.guildId,
+      options,
+    );
+    this.messages.push(message);
+    return Promise.resolve(message);
+  }
+
+  /** Every message sent here and in the threads started here, oldest thread first. */
+  get allMessages(): FakeMessage[] {
+    return [...this.messages, ...this.threadsStarted.flatMap((thread) => thread.messages)];
+  }
+
+  isThread(): this is FakeThread {
+    return false;
+  }
+
+  isTextBased(): boolean {
+    return true;
+  }
+
+  isSendable(): boolean {
+    return true;
+  }
+
+  #startThread(options: ThreadCreateOptions): Promise<FakeThread> {
+    if (this.threadError !== undefined) {
+      const error = this.threadError;
+      this.threadError = undefined;
+      return Promise.reject(error);
+    }
+    const id = `7${String(this.threadsStarted.length + 1).padStart(17, '0')}`;
+    const thread = new FakeThread(id, this, options);
+    this.threadsStarted.push(thread);
+    return Promise.resolve(thread);
+  }
+}
+
+/** A public thread a table started; it records its renames and whether it was archived. */
+export class FakeThread extends FakeChannel {
+  override readonly type: ChannelType = ChannelType.PublicThread;
+  override readonly parentId: string;
+  override readonly parent: FakeChannel;
+  name: string;
+  readonly autoArchiveDuration: number | undefined;
+  archived = false;
+  readonly archiveCalls: { readonly archived: boolean; readonly reason: string | undefined }[] = [];
+  /** Set it and every later setArchived rejects with it. */
+  archiveError: Error | undefined = undefined;
+  /** Every name setName was asked for, in order, also the ones that failed. */
+  readonly renames: string[] = [];
+  /** Set it and every later setName rejects with it. */
+  renameError: Error | undefined = undefined;
+
+  constructor(id: string, parent: FakeChannel, options: ThreadCreateOptions) {
+    super(id, parent.guildId);
+    this.parent = parent;
+    this.parentId = parent.id;
+    this.name = options.name;
+    this.autoArchiveDuration = options.autoArchiveDuration;
+  }
+
+  override isThread(): this is FakeThread {
+    return true;
+  }
+
+  setArchived(archived = true, reason?: string): Promise<this> {
+    this.archiveCalls.push({ archived, reason });
+    if (this.archiveError !== undefined) return Promise.reject(this.archiveError);
+    this.archived = archived;
+    return Promise.resolve(this);
+  }
+
+  setName(name: string): Promise<this> {
+    this.renames.push(name);
+    if (this.renameError !== undefined) return Promise.reject(this.renameError);
+    this.name = name;
+    return Promise.resolve(this);
+  }
+}
+
+/** A REST error as discord.js throws it, e.g. discordError(10008) for Unknown Message. */
+export function discordError(code: number, status = 404): DiscordAPIError {
+  return new DiscordAPIError(
+    { code, message: `Discord error ${String(code)}` },
+    code,
+    status,
+    'PATCH',
+    'https://discord.com/api/v10/channels/1/messages/1',
+    { body: undefined, files: undefined },
+  );
 }
 
 /** Whether a response's options carry the Ephemeral flag. */

@@ -7,6 +7,9 @@ import type {
 } from 'discord.js';
 import type { Logger } from '../core/logger.js';
 import type { Wallet } from '../core/wallet.js';
+import type { TableRefunds } from './tables/refunds.js';
+import type { TableRegistry } from './tables/registry.js';
+import type { TableHosts } from './tables/table.js';
 
 export interface CooldownKey {
   readonly guildId: string;
@@ -26,6 +29,11 @@ export interface AppContext {
   /** The current time; tests pass a fixed clock. */
   readonly clock: () => Temporal.Instant;
   readonly cooldowns: CooldownTracker;
+  readonly tables: TableRegistry;
+  /** Refunds table rounds that won't be settled, retrying until the database takes them. */
+  readonly refunds: TableRefunds;
+  /** Opens table threads. */
+  readonly hosts: TableHosts;
 }
 
 export interface CommandData {

@@ -12,6 +12,21 @@ export type Game = 'roulette' | 'blackjack' | 'slots';
 export type TableGame = Exclude<Game, 'slots'>;
 export type InstantGame = 'slots';
 
+/**
+ * Settling or refunding a table round that is no longer open. A table that lost the answer to
+ * its settlement learns from `status` whether that settlement went through.
+ */
+export class TableRoundClosedError extends Error {
+  override readonly name = 'TableRoundClosedError';
+
+  constructor(
+    readonly tableRoundId: number,
+    readonly status: 'settled' | 'refunded',
+  ) {
+    super(`table round ${String(tableRoundId)} is ${status}`);
+  }
+}
+
 export interface PlayerRef {
   readonly guildId: string;
   readonly userId: string;
@@ -462,9 +477,7 @@ export function createWallet(db: Database, options: WalletOptions): Wallet {
             .for('update'),
           `table round ${String(tableRoundId)}`,
         );
-        if (table.status !== 'open') {
-          throw new Error(`table round ${String(tableRoundId)} is ${table.status}`);
-        }
+        if (table.status !== 'open') throw new TableRoundClosedError(tableRoundId, table.status);
         const open = await tx
           .select({
             id: rounds.id,
@@ -540,9 +553,7 @@ export function createWallet(db: Database, options: WalletOptions): Wallet {
             .for('update'),
           `table round ${String(tableRoundId)}`,
         );
-        if (table.status !== 'open') {
-          throw new Error(`table round ${String(tableRoundId)} is ${table.status}`);
-        }
+        if (table.status !== 'open') throw new TableRoundClosedError(tableRoundId, table.status);
         const open = await tx
           .select(openRoundColumns)
           .from(rounds)

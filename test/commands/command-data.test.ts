@@ -9,9 +9,20 @@ import type { Command } from '../../src/bot/types.js';
 import balance from '../../src/commands/economy/balance.js';
 import dailygift from '../../src/commands/economy/dailygift.js';
 import leaderboard from '../../src/commands/economy/leaderboard.js';
+import blackjack from '../../src/commands/games/blackjack.js';
+import createTable from '../../src/commands/games/create-table.js';
+import roulette from '../../src/commands/games/roulette.js';
 import help from '../../src/commands/general/help.js';
 
-const commands: Readonly<Record<string, Command>> = { dailygift, balance, leaderboard, help };
+const commands: Readonly<Record<string, Command>> = {
+  dailygift,
+  balance,
+  leaderboard,
+  roulette,
+  blackjack,
+  'create-table': createTable,
+  help,
+};
 
 describe.each(Object.entries(commands))('/%s data', (name, command) => {
   const json = command.data.toJSON();
@@ -71,19 +82,57 @@ describe('command options (SPEC §3)', () => {
     ]);
   });
 
-  it('/help has an optional string choice "topic" that offers only economy for now', () => {
+  it('/help has an optional string choice "topic" with a choice per topic', () => {
     expect(help.data.toJSON().options).toEqual([
       expect.objectContaining({
         type: ApplicationCommandOptionType.String,
         name: 'topic',
         required: false,
-        choices: [{ name: 'Economy', value: 'economy' }],
+        choices: [
+          { name: 'Economy', value: 'economy' },
+          { name: 'Roulette', value: 'roulette' },
+          { name: 'Blackjack', value: 'blackjack' },
+        ],
       }),
     ]);
+  });
+
+  it('/roulette has a required bets string of at most 500 characters, with autocomplete', () => {
+    expect(roulette.data.toJSON().options).toEqual([
+      expect.objectContaining({
+        type: ApplicationCommandOptionType.String,
+        name: 'bets',
+        required: true,
+        max_length: 500,
+        autocomplete: true,
+      }),
+    ]);
+  });
+
+  it.each([['blackjack', blackjack]] as const)(
+    '/%s has a required bet string with autocomplete',
+    (_name, command) => {
+      expect(command.data.toJSON().options).toEqual([
+        expect.objectContaining({
+          type: ApplicationCommandOptionType.String,
+          name: 'bet',
+          required: true,
+          autocomplete: true,
+        }),
+      ]);
+    },
+  );
+
+  it('/create-table has none', () => {
+    expect(createTable.data.toJSON().options).toEqual([]);
   });
 });
 
 describe('cooldowns (SPEC §4)', () => {
+  it('gives /create-table 30 seconds, so nobody floods a channel with threads', () => {
+    expect(createTable.cooldown).toBe(30);
+  });
+
   it('gives /leaderboard 5 seconds and leaves the others on the default', () => {
     expect(leaderboard.cooldown).toBe(5);
     expect([dailygift, balance, help].map((command) => 'cooldown' in command)).toEqual([

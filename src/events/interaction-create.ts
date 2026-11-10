@@ -86,8 +86,17 @@ async function closeStaleComponent(
   interaction: ButtonInteraction | AnySelectMenuInteraction | ModalSubmitInteraction,
   context: AppContext,
 ): Promise<void> {
-  // Presses on a live table belong to its collector; once tables exist, return here for those.
+  // A live table's collector handles its own presses (and modals it awaits).
+  if (context.tables.owns(interaction.guildId, interaction.customId)) return;
   try {
+    // A form the live table stopped waiting for: the table is fine, so its buttons stay.
+    if (
+      interaction.isModalSubmit() &&
+      context.tables.isLive(interaction.guildId, interaction.customId)
+    ) {
+      await replyEphemeral(interaction, t(interaction.locale, 'errors.formExpired'));
+      return;
+    }
     const notice = t(interaction.locale, 'errors.tableClosed');
     if (interaction.isModalSubmit() && !interaction.isFromMessage()) {
       await replyEphemeral(interaction, notice);
