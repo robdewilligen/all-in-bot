@@ -190,7 +190,7 @@ Tests check that each announced bet covers exactly its sector of the wheel: vois
 
 A blackjack game has 4 seats and plays round after round for as long as players are seated.
 
-- **Taking a seat.** `/blackjack bet:<amount>`, or the Blackjack button of a table's lobby, takes a free seat by the seating rule (§4). That amount is the player's bet for the next round, or for the round that's about to start. A player who already has a seat in this server changes their bet for the next round instead, and gets a link to their table.
+- **Taking a seat.** `/blackjack bet:<amount>`, or the Blackjack button of a table's lobby, takes a free seat by the seating rule (§4). That amount is the player's bet for the next round, or for the round that's about to start. A player who sits down while a round is being played places that bet with Same bet once the next betting phase opens; nothing is debited without a press. A player who already has a seat in this server changes their bet for the next round instead, and gets a link to their table.
 - **Betting** (20 seconds, shown as a countdown; it ends early once every seated player has bet).
   - Buttons: Same bet (🪙 X), Change bet (a modal with an amount field, using the shared parser and limits) and Leave.
   - Placing a bet opens the player's round in the database (status `open`, stake reserved).
